@@ -280,7 +280,8 @@ def run_migrations() -> bool:
 
 def print_summary() -> None:
     header("Setup Complete")
-    print("""
+    print(
+        """
   Next steps:
 
   1. Edit .env file with your PostgreSQL credentials:
@@ -303,7 +304,8 @@ def print_summary() -> None:
 
   7. Access API docs (when CI_DEBUG=true):
      http://localhost:8000/docs
-""")
+"""
+    )
 
 
 def main() -> int:

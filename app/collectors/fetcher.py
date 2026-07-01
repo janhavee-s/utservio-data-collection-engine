@@ -298,4 +298,3 @@ class HybridFetcher:
         if self._renderer:
             await self._renderer.close()
             self._renderer = None
-

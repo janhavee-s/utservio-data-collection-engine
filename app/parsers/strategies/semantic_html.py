@@ -55,9 +55,9 @@ class SemanticHtmlStrategy(ParsingStrategy):
         for a_tag in nav.select("a[href]"):
             href = str(a_tag.get("href", ""))
             text = a_tag.get_text(strip=True).lower()
-            if any(kw in text for kw in ["service", "services", "pricing", "about", "contact"]) and (
-                href.startswith("/") or href.startswith(".")
-            ):
+            if any(
+                kw in text for kw in ["service", "services", "pricing", "about", "contact"]
+            ) and (href.startswith("/") or href.startswith(".")):
                 pass
 
     def _extract_from_main(self, soup: BeautifulSoup, result: ParsedResult, url: str) -> None:

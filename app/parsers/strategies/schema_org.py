@@ -62,9 +62,9 @@ class SchemaOrgStrategy(ParsingStrategy):
             result.services.append(
                 {
                     "name": name,
-                    "description": props.get("description", [None])[0]
-                    if props.get("description")
-                    else None,
+                    "description": (
+                        props.get("description", [None])[0] if props.get("description") else None
+                    ),
                     "category": props.get("category", [None])[0] if props.get("category") else None,
                     "starting_price": None,
                     "currency": "USD",
@@ -80,9 +80,11 @@ class SchemaOrgStrategy(ParsingStrategy):
                     "category": props.get("category", [None])[0] if props.get("category") else None,
                     "base_price": self._parse_price(price_text),
                     "promotional_price": None,
-                    "currency": props.get("priceCurrency", ["USD"])[0]
-                    if props.get("priceCurrency")
-                    else "USD",
+                    "currency": (
+                        props.get("priceCurrency", ["USD"])[0]
+                        if props.get("priceCurrency")
+                        else "USD"
+                    ),
                     "discount": None,
                     "subscription_plans": {},
                     "membership_pricing": None,

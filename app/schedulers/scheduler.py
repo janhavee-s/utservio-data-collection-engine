@@ -92,10 +92,13 @@ class CollectionScheduler:
 
     async def _get_last_collection_log(self, session: Any, competitor_id: int) -> Any:
         from app.database.repositories.collection_log_repository import CollectionLogRepository
+
         log_repo = CollectionLogRepository(session)
         return await log_repo.get_latest_by_competitor(competitor_id)
 
-    def _should_collect(self, last_log: CollectionLog | None, frequency: CollectionFrequency, now: datetime) -> bool:
+    def _should_collect(
+        self, last_log: CollectionLog | None, frequency: CollectionFrequency, now: datetime
+    ) -> bool:
         if not last_log or not last_log.start_time:
             return True
 

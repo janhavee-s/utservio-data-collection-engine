@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -7,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.database.connection import Base
 
-TEST_DATABASE_URL = (
-    "postgresql+asyncpg://utservio_test:test_password@localhost:5433/utservio_ci_test"
+TEST_DATABASE_URL = os.environ.get(
+    "CI_TEST_DATABASE_URL",
+    "postgresql+asyncpg://utservio_test:test_password@localhost:5433/utservio_ci_test",
 )
 
 

@@ -5,7 +5,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.endpoints import collection, competitors, health
+from app.api.endpoints import collection, competitors, health, metrics
 from app.api.middleware import RateLimitMiddleware
 from app.configuration.settings import Settings, get_settings
 from app.database.connection import db_manager
@@ -56,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(competitors.router)
     app.include_router(collection.router)
+    app.include_router(metrics.router)
 
     _configure_logging(settings.log_level)
 

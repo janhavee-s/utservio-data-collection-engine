@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ class ContentCollector(BaseCollector):
     async def collect(
         self, competitor_id: int, url: str, *, session: AsyncSession, **kwargs: Any
     ) -> dict[str, Any]:
-        start_time: float = __import__("time").time()
+        start_time: float = time.time()
 
         try:
             result = await self.fetch(url)

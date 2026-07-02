@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -112,6 +113,8 @@ class CompetitorSource(Base):
 
     __table_args__ = (
         UniqueConstraint("competitor_id", "url", name="uq_competitor_source_url"),
+        Index("ix_competitor_source_competitor_id", "competitor_id"),
+        Index("ix_competitor_source_url", "url"),
         {"comment": "Discovered URLs per competitor"},
     )
 
@@ -151,6 +154,8 @@ class CompetitorPage(Base):
             "source_id",
             name="uq_competitor_page_source",
         ),
+        Index("ix_competitor_page_competitor_id", "competitor_id"),
+        Index("ix_competitor_page_source_id", "source_id"),
         {"comment": "Raw page snapshots collected from competitors"},
     )
 
@@ -180,7 +185,11 @@ class CompetitorService(Base):
     # Relationships
     competitor: Mapped["Competitor"] = relationship("Competitor", back_populates="services")
 
-    __table_args__ = ({"comment": "Service listings collected from competitors"},)
+    __table_args__ = (
+        Index("ix_competitor_service_competitor_id", "competitor_id"),
+        Index("ix_competitor_service_content_hash", "content_hash"),
+        {"comment": "Service listings collected from competitors"},
+    )
 
 
 class CompetitorPricing(Base):
@@ -206,7 +215,11 @@ class CompetitorPricing(Base):
     # Relationships
     competitor: Mapped["Competitor"] = relationship("Competitor", back_populates="pricing")
 
-    __table_args__ = ({"comment": "Pricing data collected from competitors"},)
+    __table_args__ = (
+        Index("ix_competitor_pricing_competitor_id", "competitor_id"),
+        Index("ix_competitor_pricing_content_hash", "content_hash"),
+        {"comment": "Pricing data collected from competitors"},
+    )
 
 
 class CompetitorContent(Base):
@@ -233,6 +246,9 @@ class CompetitorContent(Base):
 
     __table_args__ = (
         UniqueConstraint("competitor_id", "url", name="uq_competitor_content_url"),
+        Index("ix_competitor_content_competitor_id", "competitor_id"),
+        Index("ix_competitor_content_url", "url"),
+        Index("ix_competitor_content_content_hash", "content_hash"),
         {"comment": "Blog posts, articles, and press releases"},
     )
 
@@ -259,6 +275,7 @@ class CompetitorSocial(Base):
 
     __table_args__ = (
         UniqueConstraint("competitor_id", "platform", name="uq_competitor_social_platform"),
+        Index("ix_competitor_social_competitor_id", "competitor_id"),
         {"comment": "Social media profiles per competitor"},
     )
 
@@ -284,7 +301,11 @@ class CollectionLog(Base):
     # Relationships
     competitor: Mapped["Competitor"] = relationship("Competitor", back_populates="collection_logs")
 
-    __table_args__ = ({"comment": "Audit trail of all collection runs"},)
+    __table_args__ = (
+        Index("ix_collection_log_competitor_id", "competitor_id"),
+        Index("ix_collection_log_start_time", "start_time"),
+        {"comment": "Audit trail of all collection runs"},
+    )
 
 
 class RawStorage(Base):
@@ -314,5 +335,8 @@ class RawStorage(Base):
             "source_url",
             name="uq_raw_storage_competitor_url",
         ),
+        Index("ix_raw_storage_competitor_id", "competitor_id"),
+        Index("ix_raw_storage_source_url", "source_url"),
+        Index("ix_raw_storage_content_hash", "content_hash"),
         {"comment": "Original HTML snapshots and raw data"},
     )

@@ -6,7 +6,7 @@ import structlog
 
 from app.collectors.company import CompanyCollector
 from app.collectors.content import ContentCollector
-from app.collectors.discovery import DiscoveryCollector
+from app.collectors.discovery import DiscoveryEngine
 from app.collectors.pricing import PricingCollector
 from app.collectors.service import ServiceCollector
 from app.collectors.social import SocialCollector
@@ -18,20 +18,11 @@ from app.database.repositories.competitor_source_repository import CompetitorSou
 logger = structlog.get_logger(__name__)
 
 MODULE_COLLECTORS: dict[str, Any] = {
-    "discovery": DiscoveryCollector,
     "company": CompanyCollector,
     "services": ServiceCollector,
     "pricing": PricingCollector,
     "content": ContentCollector,
     "social": SocialCollector,
-}
-
-MODULE_URL_PATTERNS = {
-    "company": ["", "/about", "/about-us", "/company"],
-    "services": ["/services", "/our-services", "/what-we-do"],
-    "pricing": ["/pricing", "/plans", "/cost"],
-    "content": ["/blog", "/news", "/resources"],
-    "social": ["", "/about"],
 }
 
 
@@ -67,22 +58,61 @@ class CollectionService:
 
                 base_url = getattr(competitor, "website_url", "")
                 source_repo = CompetitorSourceRepository(session)
-                log.info("collection_started", modules=modules)
+                log.info("collection_started", modules=modules, base_url=base_url)
+
+                discovery_engine = DiscoveryEngine()
+                discovered = await discovery_engine.discover(base_url)
+
+                discovered_urls = [d.url for d in discovered]
+                log.info(
+                    "discovery_complete",
+                    total_urls=len(discovered_urls),
+                    sources=self._count_sources(discovered),
+                )
+
+                for d in discovered:
+                    existing = await source_repo.get_by_url(competitor_id, d.url)
+                    if not existing:
+                        await source_repo.create(
+                            competitor_id=competitor_id,
+                            url=d.url,
+                            page_type=self._classify_url(d.url),
+                        )
+                    else:
+                        await source_repo.mark_crawled(existing.id)
 
                 results: dict[str, Any] = {}
                 errors: list[str] = []
                 records_collected = 0
+                skipped_urls: list[str] = []
 
                 for module in modules:
+                    if module == "discovery":
+                        results[module] = [{"status": "completed", "source": "DiscoveryEngine"}]
+                        continue
+
                     collector = self._get_collector(module)
                     if not collector:
                         log.warning("unknown_module", module=module)
                         continue
 
-                    urls = self._get_urls_for_module(module, base_url, source_repo, competitor_id)
+                    urls_to_fetch = self._select_urls_for_module(module, discovered_urls, base_url)
+
+                    if not urls_to_fetch:
+                        log.info("no_urls_for_module", module=module)
+                        skipped_urls.append(f"{module}: no matching URLs")
+                        results[module] = []
+                        continue
+
+                    log.info(
+                        "module_fetching_urls",
+                        module=module,
+                        url_count=len(urls_to_fetch),
+                        urls=urls_to_fetch[:5],
+                    )
 
                     module_results = []
-                    for url in urls:
+                    for url in urls_to_fetch:
                         try:
                             result = await collector.collect(competitor_id, url, session=session)
                             module_results.append(result)
@@ -116,7 +146,13 @@ class CollectionService:
                     retry_count=0,
                 )
 
-                log.info("collection_completed", elapsed=elapsed, modules=modules)
+                log.info(
+                    "collection_completed",
+                    elapsed=elapsed,
+                    modules=modules,
+                    records_collected=records_collected,
+                    errors=len(errors),
+                )
 
                 return {
                     "status": "success",
@@ -124,6 +160,7 @@ class CollectionService:
                     "modules_collected": modules,
                     "results": results,
                     "elapsed_seconds": elapsed,
+                    "discovered_urls": len(discovered_urls),
                 }
         except Exception as e:
             elapsed = round(time.time() - start_time, 2)
@@ -135,16 +172,57 @@ class CollectionService:
                 "elapsed_seconds": elapsed,
             }
 
-    def _get_urls_for_module(
-        self,
-        module: str,
-        base_url: str,
-        source_repo: Any,
-        competitor_id: int,
+    def _select_urls_for_module(
+        self, module: str, discovered_urls: list[str], base_url: str
     ) -> list[str]:
-        patterns = MODULE_URL_PATTERNS.get(module, [""])
+        """Select discovered URLs relevant to a module using pattern matching."""
         base = base_url.rstrip("/")
-        return [f"{base}{pattern}" if pattern else base for pattern in patterns]
+        patterns = {
+            "company": [r"/about", r"/company", r"/team", r"/story", r"/mission", r"/contact"],
+            "services": [r"/service", r"/product", r"/feature", r"/solution", r"/plan"],
+            "pricing": [r"/pric", r"/cost", r"/rate", r"/plan", r"/subscription"],
+            "content": [r"/blog", r"/article", r"/news", r"/resource", r"/case-study", r"/post"],
+            "social": [r"/social", r"/follow", r"/community"],
+        }
+
+        module_patterns = patterns.get(module, [])
+        if not module_patterns:
+            return [base]
+
+        matched = []
+        for url in discovered_urls:
+            url_lower = url.lower()
+            if any(p in url_lower for p in module_patterns):
+                matched.append(url)
+
+        if not matched:
+            return [base]
+
+        return matched[:10]
+
+    def _classify_url(self, url: str) -> str:
+        """Classify a URL into a page type based on path patterns."""
+        url_lower = url.lower()
+        if any(p in url_lower for p in ("service", "product", "feature", "solution")):
+            return "services"
+        if any(p in url_lower for p in ("pric", "cost", "rate", "plan")):
+            return "pricing"
+        if any(p in url_lower for p in ("blog", "article", "news", "post", "resource")):
+            return "content"
+        if any(p in url_lower for p in ("about", "company", "team", "contact")):
+            return "company"
+        if any(p in url_lower for p in ("social", "follow", "community")):
+            return "social"
+        if "sitemap" in url_lower:
+            return "sitemap"
+        return "general"
+
+    def _count_sources(self, discovered: list[Any]) -> dict[str, int]:
+        """Count discovered URLs by source."""
+        counts: dict[str, int] = {}
+        for d in discovered:
+            counts[d.source] = counts.get(d.source, 0) + 1
+        return counts
 
     async def close(self) -> None:
         for collector in self._collectors.values():

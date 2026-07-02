@@ -563,7 +563,7 @@ class TestMetadataStrategy:
 
 class TestStrategyParser:
     def setup_method(self) -> None:
-        self.parser = StrategyParser()
+        self.parser = StrategyParser(use_adaptive_ordering=False)
 
     def test_parses_empty_html(self) -> None:
         result = self.parser.parse("<html><body></body></html>", "https://example.com")
@@ -598,7 +598,7 @@ class TestStrategyParser:
         </script>
         </head><body></body></html>
         """
-        parser = StrategyParser(confidence_threshold=0.3)
+        parser = StrategyParser(confidence_threshold=0.3, use_adaptive_ordering=False)
         result = parser.parse(html, "https://example.com")
         assert result.company_name == "Fast Company"
 

@@ -4,40 +4,10 @@ import pytest
 
 from app.collectors.company import CompanyCollector
 from app.collectors.content import ContentCollector
-from app.collectors.discovery import DiscoveryCollector
 from app.collectors.fetcher import FetchResult
 from app.collectors.pricing import PricingCollector
 from app.collectors.service import ServiceCollector
 from app.collectors.social import SocialCollector
-
-
-class TestDiscoveryCollectorRawStorage:
-    @pytest.mark.asyncio
-    async def test_stores_raw_html(self) -> None:
-        collector = DiscoveryCollector()
-        mock_result = FetchResult(
-            html="<html><body><a href='/page'>Link</a></body></html>",
-            url="https://example.com",
-            method="httpx",
-            status_code=200,
-            content_length=45,
-        )
-
-        with (
-            patch.object(collector, "fetch", new_callable=AsyncMock, return_value=mock_result),
-            patch.object(collector, "store_raw", new_callable=AsyncMock) as mock_store,
-            patch("app.collectors.discovery.CompetitorSourceRepository") as mock_repo_cls,
-        ):
-            mock_repo = AsyncMock()
-            mock_repo.get_by_url = AsyncMock(return_value=None)
-            mock_repo.create = AsyncMock()
-            mock_repo_cls.return_value = mock_repo
-
-            session = MagicMock()
-            result = await collector.collect(1, "https://example.com", session=session)
-
-            mock_store.assert_called_once_with(1, "https://example.com", mock_result.html, session)
-            assert result["status"] == "success"
 
 
 class TestCompanyCollectorRawStorage:

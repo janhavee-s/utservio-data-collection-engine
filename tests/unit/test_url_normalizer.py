@@ -98,9 +98,9 @@ class TestNormalizeContentUrl:
         result = normalize_content_url("https://example.com/blog/post")
         assert result == "https://example.com/blog/post"
 
-    def test_root_strips_trailing_slash_for_dedup(self):
+    def test_root_preserves_trailing_slash(self):
         result = normalize_content_url("https://example.com/")
-        assert result == "https://example.com"
+        assert result == "https://example.com/"
 
     def test_with_base_url(self):
         result = normalize_content_url("/blog/post", base_url="https://example.com")

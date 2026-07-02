@@ -53,5 +53,7 @@ ms-playwright/
 Thumbs.db
 
 # Data files
-competitors.json
 *.log
+
+# Runtime state
+strategy_stats.json

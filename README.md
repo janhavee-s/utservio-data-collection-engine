@@ -4,6 +4,21 @@ Periodically crawls competitor websites and stores structured data in PostgreSQL
 
 This system does not analyze data. It collects it.
 
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Incremental Crawling** | ETag/Last-Modified conditional GET, 304 skip, content-hash deduplication |
+| **Crawl Budget Engine** | Priority queue with URL scoring (source, depth, path patterns), max pages/depth limits |
+| **Canonical URL Handling** | 50+ tracking params stripped, duplicate slashes removed, `<link rel="canonical">` extraction |
+| **DOM Context Parser** | Proximity-based extraction: heading→paragraph→list→table→price, no CSS selectors |
+| **Adaptive Strategy Ordering** | Learns strategy success rates, reorders by confidence×speed, persists to JSON |
+| **HTTP Cache Layer** | ETag, Last-Modified, Cache-Control headers, conditional GET, TTL expiration |
+| **Language Detection** | HTML `lang` tag → meta tags → text word frequency (9 languages) |
+| **Intelligent Page Classification** | URL patterns + heading keywords + Schema.org + meta tags (12 page types) |
+| **Observability** | Prometheus `/metrics` and `/metrics/summary` endpoints, counters/gauges/histograms |
+| **Performance Utilities** | LRU cache, URL/Content deduplication, `@cached_parse` decorator |
+
 ## Quick Start — Native (No Docker)
 
 ```bash
@@ -272,10 +287,12 @@ See `.env.example` for the full list.
 | DELETE | `/competitors/{id}` | Yes | Delete competitor |
 | POST | `/collection/collect` | Yes | Trigger collection by request body |
 | POST | `/collection/collect/{id}` | Yes | Trigger collection for one competitor |
+| GET | `/metrics` | No | Prometheus metrics exposition |
+| GET | `/metrics/summary` | No | JSON summary of all metrics |
 
 ### Authentication
 
-All endpoints except `/health` require an API key in the `X-API-Key` header:
+All endpoints except `/health`, `/metrics`, and `/metrics/summary` require an API key in the `X-API-Key` header:
 
 ```bash
 curl -H "X-API-Key: your-api-key" http://localhost:8000/competitors
@@ -304,6 +321,23 @@ Key design decisions:
 - **Content-hash deduplication**: Services, pricing, and content use SHA-256 content hashes to detect identical data across collection runs. No duplicate records.
 
 See [documentation/architecture.md](documentation/architecture.md) for the full schema and design rationale.
+
+---
+
+## Features Implemented (v0.9 — Release Candidate)
+
+| # | Feature | Description |
+|---|---------|-------------|
+| 1 | **Incremental Crawling** | ETag/Last-Modified conditional GET, 304 skip, content-hash deduplication |
+| 2 | **Crawl Budget Engine** | Priority queue with URL scoring (source, depth, path patterns), max pages/depth limits |
+| 3 | **Canonical URL Handling** | 50+ tracking params stripped, duplicate slashes removed, `<link rel="canonical">` extraction |
+| 4 | **DOM Context Parser** | Proximity-based extraction: heading→paragraph→list→table→price (no CSS selectors) |
+| 5 | **Adaptive Strategy Ordering** | Historical success/confidence/speed scoring, JSON persistence, auto-reorder strategies |
+| 6 | **HTTP Cache Layer** | ETag, Last-Modified, Cache-Control headers, conditional GET, TTL expiration |
+| 7 | **Language Detection** | HTML lang → meta tags → word frequency (9 languages) |
+| 8 | **Intelligent Page Classification** | URL patterns + headings + Schema.org + meta tags → 12 page types |
+| 9 | **Observability** | Prometheus `/metrics` + `/metrics/summary`, counters/gauges/histograms |
+| 10 | **Performance Utilities** | LRU cache, URL/content deduplication, `@cached_parse` decorator |
 
 ---
 

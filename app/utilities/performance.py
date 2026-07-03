@@ -178,7 +178,9 @@ def cached_parse(max_size: int = 500, ttl_seconds: int = 1800) -> Callable[[Any]
             if self_obj and hasattr(self_obj, "_strategies"):
                 strategy_sig = ",".join(s.name for s in self_obj._strategies)
 
-            content_key = hashlib.sha256(f"{url}:{len(html)}:{strategy_sig}".encode()).hexdigest()[:32]
+            content_key = hashlib.sha256(
+                f"{url}:{hashlib.sha256(html.encode()).hexdigest()[:16]}:{strategy_sig}".encode()
+            ).hexdigest()[:32]
             cached = cache.get(content_key)
             if cached is not None:
                 logger.debug("parse_cache_hit", url=url)

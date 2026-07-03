@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
@@ -10,8 +11,65 @@ import structlog
 from bs4 import BeautifulSoup
 
 from app.configuration.settings import get_settings
+from app.exceptions import DNSResolutionError, SSRFError
 
 logger = structlog.get_logger(__name__)
+
+# SSRF protection: block private/internal IPs
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_url_not_private(url: str) -> None:
+    """Raise SSRFError if URL resolves to a private/internal IP.
+
+    Prevents SSRF attacks by blocking access to private networks,
+    loopback, link-local, and cloud metadata endpoints.
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFError(f"Invalid URL: no hostname in {url}")
+
+    # Block metadata endpoints
+    metadata_hostnames = {"169.254.169.254", "metadata.google.internal", "instance-data"}
+    if hostname in metadata_hostnames:
+        raise SSRFError(f"SSRF blocked: metadata endpoint {hostname}")
+
+    # Try to parse as IP address
+    is_ip = False
+    try:
+        ip = ipaddress.ip_address(hostname)
+        is_ip = True
+    except ValueError:
+        pass
+
+    if is_ip:
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise SSRFError(f"SSRF blocked: {hostname} is in private network {network}")
+    else:
+        # Not an IP address, check for known internal hostname patterns
+        internal_patterns = [
+            r"\.local$",
+            r"\.internal$",
+            r"\.localhost$",
+            r"^localhost$",
+            r"^0\.0\.0\.0$",
+        ]
+        for pattern in internal_patterns:
+            if re.search(pattern, hostname, re.IGNORECASE):
+                raise SSRFError(
+                    f"SSRF blocked: hostname {hostname} matches internal pattern {pattern}"
+                ) from None
 
 
 @dataclass
@@ -141,10 +199,37 @@ class PageAnalyzer:
 class PlaywrightRenderer:
     """Renders JavaScript-heavy pages using Playwright."""
 
+    INSTALL_INSTRUCTIONS = (
+        "Playwright browser binaries are not installed.\n"
+        "Run: playwright install chromium\n"
+        "Or:  pip install playwright && playwright install chromium\n"
+        "Docker: COPY the playwright cache or run 'playwright install' in Dockerfile"
+    )
+
     def __init__(self) -> None:
         self._browser: Any = None
         self._context: Any = None
         self._playwright: Any = None
+
+    @staticmethod
+    async def verify_browser() -> tuple[bool, str]:
+        """Verify Chromium browser binary is installed.
+
+        Returns (is_available, message).
+        Called at startup to fail fast if browser is missing.
+        """
+        try:
+            from playwright.async_api import async_playwright
+
+            pw = await async_playwright().start()
+            try:
+                browser = await pw.chromium.launch(headless=True)
+                await browser.close()
+                return True, "Chromium browser verified"
+            finally:
+                await pw.stop()
+        except Exception as e:
+            return False, f"{PlaywrightRenderer.INSTALL_INSTRUCTIONS}\n\nError: {e}"
 
     async def _ensure_browser(self) -> Any:
         """Ensure browser is initialized."""
@@ -219,12 +304,15 @@ class RateLimiter:
     def __init__(self, rate: float) -> None:
         self._rate = rate
         self._tokens = rate
-        self._last_refill = asyncio.get_event_loop().time()
+        self._last_refill: float | None = None
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
         async with self._lock:
-            now = asyncio.get_event_loop().time()
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            if self._last_refill is None:
+                self._last_refill = now
             elapsed = now - self._last_refill
             self._tokens = min(self._rate, self._tokens + elapsed * self._rate)
             self._last_refill = now
@@ -256,6 +344,8 @@ class HttpCacheLayer:
     Enables 304 Not Modified responses to avoid re-downloading unchanged pages.
     """
 
+    MAX_ENTRIES = 10000
+
     def __init__(self) -> None:
         self._cache: dict[str, CacheEntry] = {}
 
@@ -286,6 +376,10 @@ class HttpCacheLayer:
                 entry.content_hash = content_hash
             entry.last_checked = datetime.now(UTC).isoformat()
         else:
+            if len(self._cache) >= self.MAX_ENTRIES:
+                oldest_keys = list(self._cache.keys())[: self.MAX_ENTRIES // 4]
+                for k in oldest_keys:
+                    del self._cache[k]
             entry = CacheEntry(
                 url=url,
                 etag=etag,
@@ -392,6 +486,7 @@ class HybridFetcher:
         """Fetch a page using hybrid strategy with incremental crawling support.
 
         Workflow:
+        0. Validate URL is not targeting private/internal IPs (SSRF protection)
         1. Check cache for ETag/Last-Modified
         2. Send conditional GET request
         3. If 304 Not Modified → skip parsing, update metadata, return
@@ -399,6 +494,8 @@ class HybridFetcher:
         5. Otherwise → full fetch with Playwright fallback
         6. Detect language and classify page type
         """
+        _validate_url_not_private(url)
+
         from app.parsers.language_detector import LanguageDetector
         from app.parsers.page_classifier import PageClassifier
 
@@ -467,7 +564,12 @@ class HybridFetcher:
             static_result.page_type_confidence = class_result.confidence
 
             from app.utilities.metrics import metrics
-            metrics.inc_counter("pages_analyzed_total", language=lang_result.language, page_type=class_result.page_type)
+
+            metrics.inc_counter(
+                "pages_analyzed_total",
+                language=lang_result.language,
+                page_type=class_result.page_type,
+            )
 
         analysis = self._analyzer.analyze(static_result.html)
         logger.debug(
@@ -485,6 +587,7 @@ class HybridFetcher:
         logger.info("playwright_fallback_triggered", url=url, score=analysis["score"])
 
         from app.utilities.metrics import metrics
+
         metrics.inc_counter("playwright_fallback_total")
 
         try:
@@ -520,11 +623,21 @@ class HybridFetcher:
         - 4xx client errors (except 429)
         - 404 Not Found
         - Permanent redirects
+        - DNS resolution failures (Errno 8)
         """
         if error is not None and isinstance(
             error, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError)
         ):
             return True
+
+        # DNS resolution failures are not retryable
+        if (
+            error is not None
+            and isinstance(error, OSError)
+            and hasattr(error, "errno")
+            and error.errno in (-2, -3, 8)
+        ):
+            return False
 
         if status_code is None:
             return True  # Unknown status — might be transient
@@ -664,6 +777,24 @@ class HybridFetcher:
                 )
             except httpx.TransportError as e:
                 last_error = e
+                if not self._is_retryable(None, e):
+                    # DNS resolution failures get specific exception
+                    if isinstance(e, OSError) and hasattr(e, "errno") and e.errno in (-2, -3, 8):
+                        raise DNSResolutionError(f"DNS resolution failed for {url}: {e}") from e
+                    logger.warning(
+                        "permanent_transport_error_not_retrying",
+                        url=url,
+                        error=str(e),
+                        attempt=attempt + 1,
+                    )
+                    return FetchResult(
+                        html="",
+                        url=url,
+                        method="httpx",
+                        status_code=None,
+                        content_length=0,
+                        redirect_chain=redirect_chain,
+                    )
                 logger.warning(
                     "transport_error",
                     url=url,

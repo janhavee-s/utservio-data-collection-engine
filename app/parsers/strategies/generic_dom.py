@@ -3,6 +3,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS, detect_currency, parse_price
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 
@@ -29,19 +30,9 @@ class GenericDomHeuristicStrategy(ParsingStrategy):
             result.company_name = h1_tags[0].get_text(strip=True)
 
     def _analyze_link_density(self, soup: BeautifulSoup, result: ParsedResult, url: str) -> None:
-        social_platforms = {
-            "linkedin.com": "linkedin",
-            "facebook.com": "facebook",
-            "instagram.com": "instagram",
-            "twitter.com": "twitter",
-            "x.com": "twitter",
-            "youtube.com": "youtube",
-            "pinterest.com": "pinterest",
-            "threads.net": "threads",
-        }
         for a_tag in soup.select("a[href]"):
             href = str(a_tag.get("href", ""))
-            for domain, platform in social_platforms.items():
+            for domain, platform in SOCIAL_PLATFORM_DOMAINS.items():
                 if domain in href and platform not in result.social_links:
                     result.social_links[platform] = urljoin(url, href)
 
@@ -54,7 +45,7 @@ class GenericDomHeuristicStrategy(ParsingStrategy):
         ):
             text = element.get_text(strip=True)
             if price_pattern.search(text):
-                price = self._parse_price(text)
+                price = parse_price(text)
                 if price is not None:
                     parent = element.find_parent(["div", "section", "article", "li"])
                     service_name = "Detected Service"
@@ -68,7 +59,7 @@ class GenericDomHeuristicStrategy(ParsingStrategy):
                             "category": None,
                             "base_price": price,
                             "promotional_price": None,
-                            "currency": self._detect_currency(text),
+                            "currency": detect_currency(text),
                             "discount": None,
                             "subscription_plans": {},
                             "membership_pricing": None,
@@ -84,27 +75,3 @@ class GenericDomHeuristicStrategy(ParsingStrategy):
             phone_link = soup.select_one("a[href^='tel:']")
             if phone_link:
                 result.contact_phone = str(phone_link["href"]).replace("tel:", "")
-
-    def _parse_price(self, price_text: str | None) -> float | None:
-        if not price_text:
-            return None
-        numbers = re.findall(r"[\d,]+\.?\d*", price_text.replace(",", ""))
-        if numbers:
-            try:
-                return float(numbers[0])
-            except ValueError:
-                return None
-        return None
-
-    def _detect_currency(self, price_text: str | None) -> str:
-        if not price_text:
-            return "USD"
-        if "$" in price_text:
-            return "USD"
-        if "€" in price_text:
-            return "EUR"
-        if "£" in price_text:
-            return "GBP"
-        if "₹" in price_text:
-            return "INR"
-        return "USD"

@@ -103,7 +103,7 @@ class TestExtractCanonicalUrl:
         assert result == "https://example.com/og"
 
     def test_returns_none_when_no_canonical(self) -> None:
-        html = '<html><head></head><body></body></html>'
+        html = "<html><head></head><body></body></html>"
         result = extract_canonical_url(html, "https://example.com/page")
         assert result is None
 

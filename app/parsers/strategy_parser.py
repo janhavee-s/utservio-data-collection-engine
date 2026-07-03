@@ -55,9 +55,7 @@ class StrategyParser:
                 combined.merge(partial, strategy.name, strategy.weight)
 
                 if self._orderer and partial.confidence > 0:
-                    self._orderer.record_success(
-                        strategy.name, partial.confidence, elapsed_ms
-                    )
+                    self._orderer.record_success(strategy.name, partial.confidence, elapsed_ms)
                 elif self._orderer:
                     self._orderer.record_failure(strategy.name, elapsed_ms)
             except Exception:

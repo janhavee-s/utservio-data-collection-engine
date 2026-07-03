@@ -42,8 +42,7 @@ class ContentCollector(BaseCollector):
                     title, item_url, author, content_type=content_type
                 )
 
-                existing = await content_repo.get_by_url(competitor_id, item_url)
-                await content_repo.upsert(
+                _, was_created = await content_repo.upsert(
                     competitor_id=competitor_id,
                     content_hash=content_hash,
                     title=title,
@@ -52,10 +51,10 @@ class ContentCollector(BaseCollector):
                     summary=item.get("summary"),
                     content_type=content_type,
                 )
-                if existing:
-                    content_updated += 1
-                else:
+                if was_created:
                     content_created += 1
+                else:
+                    content_updated += 1
 
             return {
                 "status": "success",

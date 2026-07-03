@@ -1,5 +1,9 @@
+import hashlib
+import os
+import platform
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
@@ -13,6 +17,39 @@ from app.database.connection import db_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    settings = get_settings()
+
+    logger = structlog.get_logger("startup")
+    api_key_hash = (
+        hashlib.sha256(settings.api_key.encode()).hexdigest()[:16] if settings.api_key else "none"
+    )
+    logger.info(
+        "application_startup",
+        pid=os.getpid(),
+        python=platform.python_version(),
+        env=settings.environment,
+        debug=settings.debug,
+        api_key_hash=f"{api_key_hash}...",
+        api_key_length=len(settings.api_key) if settings.api_key else 0,
+        working_directory=str(Path.cwd()),
+        env_file_exists=Path(".env").exists(),
+        database_url=settings.database.url.split("@")[-1]
+        if "@" in settings.database.url
+        else settings.database.url,
+    )
+
+    from app.collectors.fetcher import PlaywrightRenderer
+
+    browser_ok, browser_msg = await PlaywrightRenderer.verify_browser()
+    if browser_ok:
+        logger.info("playwright_browser_verified", message=browser_msg)
+    else:
+        logger.error(
+            "playwright_browser_missing",
+            message=browser_msg,
+            hint="Application will continue but JS-rendered pages will fail",
+        )
+
     await db_manager.connect()
     await db_manager.create_tables()
 
@@ -24,10 +61,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await scheduler.start()
 
+    logger.info("application_ready", playwright_available=browser_ok)
+
     yield
 
     await scheduler.stop()
     await db_manager.disconnect()
+    logger.info("application_shutdown")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -41,7 +81,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
         lifespan=lifespan,
+        openapi_tags=[
+            {"name": "health", "description": "Health and status endpoints"},
+            {"name": "competitors", "description": "Competitor management"},
+            {"name": "collection", "description": "Data collection operations"},
+            {"name": "metrics", "description": "System metrics"},
+        ],
     )
+
+    app.openapi_schema = app.openapi()
+    if app.openapi_schema:
+        app.openapi_schema["components"] = app.openapi_schema.get("components", {})
+        app.openapi_schema["components"]["securitySchemes"] = {
+            "ApiKeyHeader": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": "API key for authentication. Pass the X-API-Key header.",
+            }
+        }
+        app.openapi_schema["security"] = [{"ApiKeyHeader": []}]
 
     app.add_middleware(
         CORSMiddleware,

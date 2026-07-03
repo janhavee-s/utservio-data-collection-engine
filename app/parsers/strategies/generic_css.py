@@ -1,9 +1,9 @@
-import re
 from typing import ClassVar
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import detect_currency, parse_price
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 
@@ -83,9 +83,9 @@ class GenericCssPatternStrategy(ParsingStrategy):
                     {
                         "service_name": name,
                         "category": None,
-                        "base_price": self._parse_price(price_text),
+                        "base_price": parse_price(price_text),
                         "promotional_price": None,
-                        "currency": self._detect_currency(price_text),
+                        "currency": detect_currency(price_text),
                         "discount": None,
                         "subscription_plans": {},
                         "membership_pricing": None,
@@ -119,27 +119,3 @@ class GenericCssPatternStrategy(ParsingStrategy):
                     desc_el = card.select_one("p, .description, .about")
                     if desc_el:
                         result.description = desc_el.get_text(strip=True)
-
-    def _parse_price(self, price_text: str | None) -> float | None:
-        if not price_text:
-            return None
-        numbers = re.findall(r"[\d,]+\.?\d*", price_text.replace(",", ""))
-        if numbers:
-            try:
-                return float(numbers[0])
-            except ValueError:
-                return None
-        return None
-
-    def _detect_currency(self, price_text: str | None) -> str:
-        if not price_text:
-            return "USD"
-        if "$" in price_text:
-            return "USD"
-        if "€" in price_text:
-            return "EUR"
-        if "£" in price_text:
-            return "GBP"
-        if "₹" in price_text:
-            return "INR"
-        return "USD"

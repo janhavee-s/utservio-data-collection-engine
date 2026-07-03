@@ -27,6 +27,15 @@ class CollectionFrequency(enum.StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
 
+    @property
+    def interval_seconds(self) -> int:
+        """Return the interval in seconds for this frequency."""
+        return {
+            CollectionFrequency.HOURLY: 3600,
+            CollectionFrequency.DAILY: 86400,
+            CollectionFrequency.WEEKLY: 604800,
+        }[self]
+
 
 class CollectionStatus(enum.StrEnum):
     SUCCESS = "success"
@@ -89,7 +98,10 @@ class Competitor(Base):
         "CollectionLog", back_populates="competitor", cascade="all, delete-orphan"
     )
 
-    __table_args__ = ({"comment": "Registered competitor websites"},)
+    __table_args__ = (
+        Index("ix_competitor_collection_frequency", "collection_frequency"),
+        {"comment": "Registered competitor websites"},
+    )
 
 
 class CompetitorSource(Base):
@@ -206,7 +218,7 @@ class CompetitorPricing(Base):
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     discount: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     membership_pricing: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    subscription_plans: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    subscription_plans: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

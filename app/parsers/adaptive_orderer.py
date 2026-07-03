@@ -11,6 +11,8 @@ Persists statistics for future crawl runs.
 """
 
 import json
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +21,8 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-STATS_FILE = Path("strategy_stats.json")
+STATS_FILE = Path(tempfile.gettempdir()) / "utservio_strategy_stats.json"
+SAVE_DEBOUNCE_SECONDS = 60.0
 
 
 @dataclass
@@ -102,9 +105,13 @@ class AdaptiveStrategyOrderer:
     to run the most effective ones first.
     """
 
-    def __init__(self, stats_file: Path | None = None) -> None:
+    def __init__(
+        self, stats_file: Path | None = None, save_debounce: float = SAVE_DEBOUNCE_SECONDS
+    ) -> None:
         self._stats_file = stats_file or STATS_FILE
         self._stats: dict[str, StrategyStats] = {}
+        self._last_save_time: float = 0.0
+        self._save_debounce = save_debounce
         self._load_stats()
 
     def _load_stats(self) -> None:
@@ -127,12 +134,26 @@ class AdaptiveStrategyOrderer:
             logger.warning("strategy_stats_load_failed", error=str(e))
 
     def save_stats(self) -> None:
-        """Persist statistics to disk."""
+        """Persist statistics to disk with debouncing.
+
+        Only writes if at least save_debounce seconds have passed since the last save.
+        Call save_stats_force() to bypass the debounce.
+        """
+        now = time.monotonic()
+        if now - self._last_save_time < self._save_debounce:
+            return
+        self._do_save()
+
+    def save_stats_force(self) -> None:
+        """Force persist statistics to disk, bypassing debounce."""
+        self._do_save()
+
+    def _do_save(self) -> None:
+        """Actually write stats to disk."""
         try:
-            data = {
-                "strategies": [s.to_dict() for s in self._stats.values()]
-            }
+            data = {"strategies": [s.to_dict() for s in self._stats.values()]}
             self._stats_file.write_text(json.dumps(data, indent=2))
+            self._last_save_time = time.monotonic()
             logger.debug("strategy_stats_saved", count=len(self._stats))
         except Exception as e:
             logger.warning("strategy_stats_save_failed", error=str(e))
@@ -143,9 +164,7 @@ class AdaptiveStrategyOrderer:
             self._stats[strategy_name] = StrategyStats(name=strategy_name)
         return self._stats[strategy_name]
 
-    def record_success(
-        self, strategy_name: str, confidence: float, time_ms: float
-    ) -> None:
+    def record_success(self, strategy_name: str, confidence: float, time_ms: float) -> None:
         """Record a successful parse for a strategy."""
         stats = self.get_stats(strategy_name)
         stats.record_success(confidence, time_ms)

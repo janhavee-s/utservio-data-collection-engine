@@ -137,6 +137,7 @@ def normalize_content_url(url: str, *, base_url: str | None = None) -> str:
     """
     normalized = normalize_url(url, base_url=base_url)
     from urllib.parse import urlparse as _urlparse
+
     parsed = _urlparse(normalized)
     if parsed.path != "/" and normalized.endswith("/"):
         normalized = normalized.rstrip("/")

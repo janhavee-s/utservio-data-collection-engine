@@ -152,7 +152,7 @@ class DOMContextParser:
         """Extract text from the nearest text-bearing element."""
         nearest = self._find_nearest(element, TEXT_TAGS, max_distance)
         if nearest:
-            return nearest.get_text(strip=True)
+            return str(nearest.get_text(strip=True))
         return ""
 
     def _extract_context(self, heading: Tag) -> DOMContext:
@@ -169,9 +169,7 @@ class DOMContextParser:
         lst = self._find_nearest(heading, LIST_TAGS, 3)
         if lst:
             ctx.list_items = [
-                li.get_text(strip=True)
-                for li in lst.find_all("li")
-                if li.get_text(strip=True)
+                li.get_text(strip=True) for li in lst.find_all("li") if li.get_text(strip=True)
             ]
 
         btn = self._find_nearest(heading, {"button"}, 3)
@@ -207,8 +205,10 @@ class DOMContextParser:
         seen_names: set[str] = set()
 
         service_headings = [
-            h for h in soup.find_all(re.compile(r"^h[2-4]$"))
-            if h.string and re.search(
+            h
+            for h in soup.find_all(re.compile(r"^h[2-4]$"))
+            if h.string
+            and re.search(
                 r"service|our\s+service|what\s+we\s+do|solution|offering",
                 str(h.string),
                 re.IGNORECASE,
@@ -241,13 +241,15 @@ class DOMContextParser:
                     with contextlib.suppress(ValueError):
                         price = float(price_str)
 
-            services.append({
-                "name": name,
-                "description": description[:500] if description else "",
-                "starting_price": price,
-                "category": self._categorize_content(name),
-                "url": url,
-            })
+            services.append(
+                {
+                    "name": name,
+                    "description": description[:500] if description else "",
+                    "starting_price": price,
+                    "category": self._categorize_content(name),
+                    "url": url,
+                }
+            )
             seen_names.add(name)
 
         return services[:50]
@@ -258,8 +260,10 @@ class DOMContextParser:
         seen_names: set[str] = set()
 
         pricing_headings = [
-            h for h in soup.find_all(re.compile(r"^h[2-4]$"))
-            if h.string and re.search(
+            h
+            for h in soup.find_all(re.compile(r"^h[2-4]$"))
+            if h.string
+            and re.search(
                 r"pric|cost|plan|subscription|tier",
                 str(h.string),
                 re.IGNORECASE,
@@ -290,12 +294,14 @@ class DOMContextParser:
                     with contextlib.suppress(ValueError):
                         price = float(price_str)
 
-            pricing.append({
-                "service_name": ctx.heading,
-                "base_price": price,
-                "category": self._categorize_content(ctx.heading),
-                "url": url,
-            })
+            pricing.append(
+                {
+                    "service_name": ctx.heading,
+                    "base_price": price,
+                    "category": self._categorize_content(ctx.heading),
+                    "url": url,
+                }
+            )
             seen_names.add(ctx.heading)
 
         return pricing[:50]
@@ -323,6 +329,7 @@ class DOMContextParser:
             link_url = ""
             if link:
                 from urllib.parse import urljoin as _urljoin
+
                 link_url = _urljoin(url, str(link["href"]))
 
             date_el = article.find("time")
@@ -331,12 +338,14 @@ class DOMContextParser:
                 raw = date_el.get("datetime") or date_el.get_text(strip=True)
                 date_str = str(raw) if raw else ""
 
-            articles.append({
-                "title": title,
-                "summary": summary[:500],
-                "url": link_url or url,
-                "date": date_str,
-            })
+            articles.append(
+                {
+                    "title": title,
+                    "summary": summary[:500],
+                    "url": link_url or url,
+                    "date": date_str,
+                }
+            )
             seen_titles.add(title)
 
         if not articles:
@@ -348,11 +357,13 @@ class DOMContextParser:
                 if len(ctx.heading) < 5 or len(ctx.heading) > 200:
                     continue
 
-                articles.append({
-                    "title": ctx.heading,
-                    "summary": ctx.paragraph[:500] if ctx.paragraph else "",
-                    "url": url,
-                })
+                articles.append(
+                    {
+                        "title": ctx.heading,
+                        "summary": ctx.paragraph[:500] if ctx.paragraph else "",
+                        "url": url,
+                    }
+                )
                 seen_titles.add(ctx.heading)
 
         return articles[:50]
@@ -407,11 +418,13 @@ class DOMContextParser:
             href = str(a_tag["href"])
             for domain, platform in social_domains.items():
                 if domain in href.lower() and platform not in seen_platforms:
-                    profiles.append({
-                        "platform": platform,
-                        "profile_url": href,
-                        "username": "",
-                    })
+                    profiles.append(
+                        {
+                            "platform": platform,
+                            "profile_url": href,
+                            "username": "",
+                        }
+                    )
                     seen_platforms.add(platform)
                     break
 
@@ -434,7 +447,7 @@ class DOMContextParser:
 
         h1 = soup.find("h1")
         if h1:
-            return h1.get_text(strip=True)
+            return str(h1.get_text(strip=True))
 
         return None
 

@@ -7,7 +7,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 MAX_IPS = 10000
-IP_TTL_SECONDS = 300  # 5 minutes
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

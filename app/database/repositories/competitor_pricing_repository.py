@@ -52,19 +52,18 @@ class CompetitorPricingRepository(BaseRepository):
         currency: str = "USD",
         discount: float | None = None,
         membership_pricing: dict[str, object] | None = None,
-        subscription_plans: dict[str, object] | None = None,
-    ) -> CompetitorPricing:
+        subscription_plans: list[str] | None = None,
+    ) -> tuple[CompetitorPricing, bool]:
         """Insert or update a pricing entry based on content hash.
 
-        If an identical pricing entry (same competitor and content hash) exists,
-        update its collected_at timestamp. Otherwise, create a new record.
+        Returns (row, was_created) where was_created is True if a new record was inserted.
         """
         existing = await self.get_by_hash(competitor_id, content_hash)
         if existing:
             existing.collected_at = datetime.now(UTC)
             await self._session.flush()
-            return existing
-        return await self.create(  # type: ignore[no-any-return]
+            return existing, False
+        row = await self.create(
             competitor_id=competitor_id,
             content_hash=content_hash,
             service_name=service_name,
@@ -74,8 +73,9 @@ class CompetitorPricingRepository(BaseRepository):
             currency=currency,
             discount=discount,
             membership_pricing=membership_pricing,
-            subscription_plans=subscription_plans or {},
+            subscription_plans=subscription_plans or [],
         )
+        return row, True
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
         pricing = await self.get_by_competitor(competitor_id)

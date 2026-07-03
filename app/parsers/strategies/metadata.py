@@ -3,6 +3,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 
@@ -109,13 +110,4 @@ class MetadataStrategy(ParsingStrategy):
         return None
 
     def _social_platforms(self) -> dict[str, str]:
-        return {
-            "linkedin.com": "linkedin",
-            "facebook.com": "facebook",
-            "instagram.com": "instagram",
-            "twitter.com": "twitter",
-            "x.com": "twitter",
-            "youtube.com": "youtube",
-            "pinterest.com": "pinterest",
-            "threads.net": "threads",
-        }
+        return SOCIAL_PLATFORM_DOMAINS

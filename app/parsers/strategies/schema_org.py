@@ -3,6 +3,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS, parse_price
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 SCHEMA_ORG_TYPES = {
@@ -78,7 +79,7 @@ class SchemaOrgStrategy(ParsingStrategy):
                 {
                     "service_name": name,
                     "category": props.get("category", [None])[0] if props.get("category") else None,
-                    "base_price": self._parse_price(price_text),
+                    "base_price": parse_price(price_text),
                     "promotional_price": None,
                     "currency": (
                         props.get("priceCurrency", ["USD"])[0]
@@ -121,31 +122,8 @@ class SchemaOrgStrategy(ParsingStrategy):
                 if platform and platform not in result.social_links:
                     result.social_links[platform] = link
 
-    def _parse_price(self, price_text: str | None) -> float | None:
-        if not price_text:
-            return None
-        import re
-
-        numbers = re.findall(r"[\d,]+\.?\d*", price_text.replace(",", ""))
-        if numbers:
-            try:
-                return float(numbers[0])
-            except ValueError:
-                return None
-        return None
-
     def _detect_platform(self, url: str) -> str | None:
-        platforms = {
-            "linkedin.com": "linkedin",
-            "facebook.com": "facebook",
-            "instagram.com": "instagram",
-            "twitter.com": "twitter",
-            "x.com": "twitter",
-            "youtube.com": "youtube",
-            "pinterest.com": "pinterest",
-            "threads.net": "threads",
-        }
-        for domain, platform in platforms.items():
+        for domain, platform in SOCIAL_PLATFORM_DOMAINS.items():
             if domain in url:
                 return platform
         return None

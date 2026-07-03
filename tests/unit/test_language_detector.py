@@ -58,7 +58,7 @@ class TestLanguageDetector:
         assert result.language == "de"
 
     def test_defaults_to_english_when_no_signal(self) -> None:
-        html = '<html><head></head><body><p>123 456 789</p></body></html>'
+        html = "<html><head></head><body><p>123 456 789</p></body></html>"
         result = self.detector.detect(html)
         assert result.language in ("en", "es", "fr", "de", "pt")
 

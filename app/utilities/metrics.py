@@ -34,6 +34,9 @@ class MetricsCollector:
     Supports counters, gauges, and histograms.
     """
 
+    MAX_COUNTER_ENTRIES = 10000
+    MAX_HISTOGRAM_ENTRIES = 10000
+
     def __init__(self) -> None:
         self._counters: dict[str, list[MetricValue]] = defaultdict(list)
         self._gauges: dict[str, float] = {}
@@ -43,15 +46,23 @@ class MetricsCollector:
     def inc_counter(self, name: str, value: float = 1.0, **labels: str) -> None:
         """Increment a counter metric."""
         self._counters[name].append(MetricValue(value=value, labels=labels))
+        if len(self._counters[name]) > self.MAX_COUNTER_ENTRIES:
+            self._counters[name] = self._counters[name][-self.MAX_COUNTER_ENTRIES :]
 
     def set_gauge(self, name: str, value: float, **labels: str) -> None:
         """Set a gauge metric."""
         key = f"{name}:{':'.join(f'{k}={v}' for k, v in sorted(labels.items()))}"
         self._gauges[key] = value
+        if len(self._gauges) > self.MAX_COUNTER_ENTRIES:
+            keys = list(self._gauges.keys())
+            for k in keys[: len(keys) // 2]:
+                del self._gauges[k]
 
     def observe_histogram(self, name: str, value: float, **labels: str) -> None:
         """Record a histogram observation."""
         self._histograms[name].append(value)
+        if len(self._histograms[name]) > self.MAX_HISTOGRAM_ENTRIES:
+            self._histograms[name] = self._histograms[name][-self.MAX_HISTOGRAM_ENTRIES :]
 
     def get_counter_total(self, name: str, **labels: str) -> float:
         """Get total value of a counter."""
@@ -70,7 +81,16 @@ class MetricsCollector:
         """Get histogram statistics."""
         values = self._histograms.get(name, [])
         if not values:
-            return {"count": 0.0, "sum": 0.0, "avg": 0.0, "min": 0.0, "max": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0}
+            return {
+                "count": 0.0,
+                "sum": 0.0,
+                "avg": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+            }
 
         sorted_vals = sorted(values)
         count = len(sorted_vals)
@@ -117,10 +137,10 @@ class MetricsCollector:
                 continue
             stats = self.get_histogram_stats(name)
             lines.append(f"# TYPE {name} histogram")
-            lines.append(f'{name}_count {stats["count"]}')
-            lines.append(f'{name}_sum {stats["sum"]}')
+            lines.append(f"{name}_count {stats['count']}")
+            lines.append(f"{name}_sum {stats['sum']}")
             for bucket_name in ["min", "p50", "p95", "p99", "max"]:
-                lines.append(f'{name}_{bucket_name} {stats[bucket_name]}')
+                lines.append(f"{name}_{bucket_name} {stats[bucket_name]}")
             lines.append("")
 
         uptime = time.time() - self._start_time

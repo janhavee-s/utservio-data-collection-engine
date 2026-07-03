@@ -1,9 +1,11 @@
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import verify_api_key
 from app.api.dependencies import get_session
 from app.database.models import CollectionLog, Competitor
 
@@ -11,7 +13,10 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/status")
-async def status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def status(
+    session: AsyncSession = Depends(get_session),
+    _auth: str = Security(verify_api_key),
+) -> dict[str, Any]:
     competitor_count = await session.scalar(select(func.count()).select_from(Competitor))
     log_count = await session.scalar(select(func.count()).select_from(CollectionLog))
     return {
@@ -23,8 +28,9 @@ async def status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]
 
 @router.get("/logs")
 async def get_logs(
-    limit: int = 50,
+    limit: Annotated[int, Field(ge=1, le=1000)] = 50,
     session: AsyncSession = Depends(get_session),
+    _auth: str = Security(verify_api_key),
 ) -> list[dict[str, Any]]:
     stmt = select(CollectionLog).order_by(CollectionLog.id.desc()).limit(limit)
     result = await session.execute(stmt)

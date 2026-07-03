@@ -1,9 +1,9 @@
-import re
 from typing import Any
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS, detect_currency, parse_price
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 
@@ -97,9 +97,9 @@ class SemanticHtmlStrategy(ParsingStrategy):
                         {
                             "service_name": cells[0],
                             "category": cells[2] if len(cells) > 2 else None,
-                            "base_price": self._parse_price(cells[1]),
+                            "base_price": parse_price(cells[1]),
                             "promotional_price": None,
-                            "currency": self._detect_currency(cells[1]),
+                            "currency": detect_currency(cells[1]),
                             "discount": None,
                             "subscription_plans": {},
                             "membership_pricing": None,
@@ -176,40 +176,8 @@ class SemanticHtmlStrategy(ParsingStrategy):
             result.contact_phone = str(phone_link["href"]).replace("tel:", "")
 
     def _extract_social_links(self, soup: BeautifulSoup, result: ParsedResult, url: str) -> None:
-        platforms = {
-            "linkedin.com": "linkedin",
-            "facebook.com": "facebook",
-            "instagram.com": "instagram",
-            "twitter.com": "twitter",
-            "x.com": "twitter",
-            "youtube.com": "youtube",
-        }
         for a_tag in soup.select("a[href]"):
             href = str(a_tag.get("href", ""))
-            for domain, platform in platforms.items():
+            for domain, platform in SOCIAL_PLATFORM_DOMAINS.items():
                 if domain in href and platform not in result.social_links:
                     result.social_links[platform] = urljoin(url, href)
-
-    def _parse_price(self, price_text: str | None) -> float | None:
-        if not price_text:
-            return None
-        numbers = re.findall(r"[\d,]+\.?\d*", price_text.replace(",", ""))
-        if numbers:
-            try:
-                return float(numbers[0])
-            except ValueError:
-                return None
-        return None
-
-    def _detect_currency(self, price_text: str | None) -> str:
-        if not price_text:
-            return "USD"
-        if "$" in price_text:
-            return "USD"
-        if "€" in price_text:
-            return "EUR"
-        if "£" in price_text:
-            return "GBP"
-        if "₹" in price_text:
-            return "INR"
-        return "USD"

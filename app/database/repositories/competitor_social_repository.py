@@ -34,19 +34,24 @@ class CompetitorSocialRepository(BaseRepository):
         platform: SocialPlatform,
         profile_url: str,
         username: str | None = None,
-    ) -> CompetitorSocial:
+    ) -> tuple[CompetitorSocial, bool]:
+        """Insert or update a social profile.
+
+        Returns (row, was_created) where was_created is True if a new record was inserted.
+        """
         existing = await self.get_by_platform(competitor_id, platform)
         if existing:
             existing.profile_url = profile_url
             existing.username = username
             await self._session.flush()
-            return existing
-        return await self.create(  # type: ignore[no-any-return]
+            return existing, False
+        row = await self.create(
             competitor_id=competitor_id,
             platform=platform,
             profile_url=profile_url,
             username=username,
         )
+        return row, True
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
         profiles = await self.get_by_competitor(competitor_id)

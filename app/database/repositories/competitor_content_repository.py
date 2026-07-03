@@ -60,28 +60,26 @@ class CompetitorContentRepository(BaseRepository):
         summary: str | None = None,
         raw_content: str | None = None,
         content_type: str | None = None,
-    ) -> CompetitorContent:
+    ) -> tuple[CompetitorContent, bool]:
         """Insert or update a content item based on URL or content hash.
 
-        First checks by URL (primary dedup key), then by content hash
-        (catches same content at different URLs). If found, updates the
-        collected_at timestamp. Otherwise, creates a new record.
+        Returns (row, was_created) where was_created is True if a new record was inserted.
         """
         # Primary: check by URL
         existing = await self.get_by_url(competitor_id, url)
         if existing:
             existing.collected_at = datetime.now(UTC)
             await self._session.flush()
-            return existing
+            return existing, False
 
         # Secondary: check by content hash (same content, different URL)
         existing = await self.get_by_hash(competitor_id, content_hash)
         if existing:
             existing.collected_at = datetime.now(UTC)
             await self._session.flush()
-            return existing
+            return existing, False
 
-        return await self.create(  # type: ignore[no-any-return]
+        row = await self.create(
             competitor_id=competitor_id,
             content_hash=content_hash,
             title=title,
@@ -92,6 +90,7 @@ class CompetitorContentRepository(BaseRepository):
             raw_content=raw_content,
             content_type=content_type,
         )
+        return row, True
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
         content = await self.get_by_competitor(competitor_id)

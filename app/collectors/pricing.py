@@ -42,8 +42,7 @@ class PricingCollector(BaseCollector):
                     service_name, category, base_price, promotional_price, currency
                 )
 
-                existing = await pricing_repo.get_by_hash(competitor_id, content_hash)
-                await pricing_repo.upsert(
+                _, was_created = await pricing_repo.upsert(
                     competitor_id=competitor_id,
                     content_hash=content_hash,
                     service_name=service_name,
@@ -53,12 +52,12 @@ class PricingCollector(BaseCollector):
                     currency=currency,
                     discount=item.get("discount"),
                     membership_pricing=item.get("membership_pricing"),
-                    subscription_plans=item.get("subscription_plans", {}),
+                    subscription_plans=item.get("subscription_plans") or [],
                 )
-                if existing:
-                    pricing_updated += 1
-                else:
+                if was_created:
                     pricing_created += 1
+                else:
+                    pricing_updated += 1
 
             return {
                 "status": "success",

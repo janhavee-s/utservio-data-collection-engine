@@ -279,6 +279,7 @@ class PageClassifier:
         for script in soup.find_all("script", type="application/ld+json"):
             try:
                 import json
+
                 data = json.loads(script.string or "{}")
                 items = data if isinstance(data, list) else [data]
                 for item in items:
@@ -300,9 +301,7 @@ class PageClassifier:
             title_text = str(title.string).lower()
             for page_type, patterns in URL_PATTERNS.items():
                 for pattern, weight in patterns:
-                    clean_pattern = pattern.replace("^https?://[^/]+/?$", "").replace(
-                        "/?", ""
-                    )
+                    clean_pattern = pattern.replace("^https?://[^/]+/?$", "").replace("/?", "")
                     if clean_pattern and re.search(clean_pattern.replace("\\", ""), title_text):
                         scores[page_type] = max(scores.get(page_type, 0), weight * 0.8)
 

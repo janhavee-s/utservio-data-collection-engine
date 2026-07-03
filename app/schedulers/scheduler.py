@@ -102,14 +102,8 @@ class CollectionScheduler:
         if not last_log or not last_log.start_time:
             return True
 
-        interval_map = {
-            CollectionFrequency.HOURLY: 3600,
-            CollectionFrequency.DAILY: 86400,
-            CollectionFrequency.WEEKLY: 604800,
-        }
-        interval = interval_map.get(frequency, 86400)
         elapsed = (now - last_log.start_time).total_seconds()
-        return elapsed >= interval
+        return elapsed >= frequency.interval_seconds
 
     @property
     def is_running(self) -> bool:

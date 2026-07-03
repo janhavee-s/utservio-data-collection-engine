@@ -78,7 +78,9 @@ class TestPageClassifier:
         assert result.page_type in (PageType.UNKNOWN, PageType.HOMEPAGE)
 
     def test_classification_result_dataclass(self) -> None:
-        result = PageClassifier().classify("<html><h1>Services</h1></html>", "https://example.com/services")
+        result = PageClassifier().classify(
+            "<html><h1>Services</h1></html>", "https://example.com/services"
+        )
         assert result.page_type is not None
         assert result.confidence >= 0
         assert isinstance(result.signals_used, list)

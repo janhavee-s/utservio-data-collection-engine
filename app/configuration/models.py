@@ -2,11 +2,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-
-class CollectionFrequency(StrEnum):
-    HOURLY = "hourly"
-    DAILY = "daily"
-    WEEKLY = "weekly"
+from app.database.models import CollectionFrequency
 
 
 class CollectionModule(StrEnum):

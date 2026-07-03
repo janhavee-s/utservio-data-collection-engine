@@ -11,6 +11,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-utservio}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-utservio_ci}
+      - PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
     depends_on:
       postgres:
         condition: service_healthy

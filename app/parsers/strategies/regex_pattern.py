@@ -3,6 +3,7 @@ from typing import ClassVar
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import detect_currency, parse_price
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 
@@ -65,7 +66,7 @@ class RegexPatternStrategy(ParsingStrategy):
         for pattern in self.PRICE_PATTERNS:
             matches = pattern.findall(text)
             for match in matches[:5]:
-                price = self._parse_price(match)
+                price = parse_price(match)
                 if price is not None and price > 0:
                     result.pricing.append(
                         {
@@ -73,7 +74,7 @@ class RegexPatternStrategy(ParsingStrategy):
                             "category": None,
                             "base_price": price,
                             "promotional_price": None,
-                            "currency": self._detect_currency(match),
+                            "currency": detect_currency(match),
                             "discount": None,
                             "subscription_plans": {},
                             "membership_pricing": None,
@@ -89,27 +90,3 @@ class RegexPatternStrategy(ParsingStrategy):
             match = pattern.search(html)
             if match:
                 result.social_links[platform] = match.group(0)
-
-    def _parse_price(self, price_text: str | None) -> float | None:
-        if not price_text:
-            return None
-        numbers = re.findall(r"[\d,]+\.?\d*", price_text.replace(",", ""))
-        if numbers:
-            try:
-                return float(numbers[0])
-            except ValueError:
-                return None
-        return None
-
-    def _detect_currency(self, price_text: str | None) -> str:
-        if not price_text:
-            return "USD"
-        if "$" in price_text:
-            return "USD"
-        if "€" in price_text:
-            return "EUR"
-        if "£" in price_text:
-            return "GBP"
-        if "₹" in price_text:
-            return "INR"
-        return "USD"

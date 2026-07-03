@@ -1,13 +1,11 @@
 import json
-import logging
 from typing import Any
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS
 from app.parsers.strategy import ParsedResult, ParsingStrategy
-
-logger = logging.getLogger(__name__)
 
 SCHEMA_ORG_TYPES = {
     "LocalBusiness",
@@ -167,17 +165,7 @@ class JsonLdStrategy(ParsingStrategy):
         return None
 
     def _detect_platform(self, url: str) -> str | None:
-        platforms = {
-            "linkedin.com": "linkedin",
-            "facebook.com": "facebook",
-            "instagram.com": "instagram",
-            "twitter.com": "twitter",
-            "x.com": "twitter",
-            "youtube.com": "youtube",
-            "pinterest.com": "pinterest",
-            "threads.net": "threads",
-        }
-        for domain, platform in platforms.items():
+        for domain, platform in SOCIAL_PLATFORM_DOMAINS.items():
             if domain in url:
                 return platform
         return None

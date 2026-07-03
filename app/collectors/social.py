@@ -42,17 +42,16 @@ class SocialCollector(BaseCollector):
                 profile_url = normalize_url(profile.get("profile_url", ""), base_url=url)
                 username = profile.get("username")
 
-                existing = await social_repo.get_by_platform(competitor_id, platform)
-                await social_repo.upsert(
+                _, was_created = await social_repo.upsert(
                     competitor_id=competitor_id,
                     platform=platform,
                     profile_url=profile_url,
                     username=username,
                 )
-                if existing:
-                    profiles_updated += 1
-                else:
+                if was_created:
                     profiles_created += 1
+                else:
+                    profiles_updated += 1
 
             return {
                 "status": "success",

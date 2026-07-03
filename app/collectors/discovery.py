@@ -7,7 +7,6 @@ import structlog
 from bs4 import BeautifulSoup
 
 from app.configuration.settings import get_settings
-from app.utilities.performance import URLDeduplicator
 from app.utilities.url_normalizer import normalize_url
 
 logger = structlog.get_logger(__name__)
@@ -37,13 +36,11 @@ class DiscoveryEngine:
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._settings = get_settings().discovery
-        self._url_dedup = URLDeduplicator()
         self._owned_client = client is None
         self._client = client
 
     async def discover(self, base_url: str) -> list[DiscoveredURL]:
         """Run full discovery pipeline and return ranked URLs."""
-        self._url_dedup.reset()
         all_urls: list[DiscoveredURL] = []
 
         parsed_base = urlparse(base_url)
@@ -314,15 +311,13 @@ class DiscoveryEngine:
 
         for discovered in urls:
             normalized = discovered.url.rstrip("/")
-            if self._url_dedup.is_duplicate(normalized):
-                if normalized in seen:
-                    existing = seen[normalized]
-                    if source_priority.get(discovered.source, 99) < source_priority.get(
-                        existing.source, 99
-                    ):
-                        seen[normalized] = discovered
+            if normalized in seen:
+                existing = seen[normalized]
+                if source_priority.get(discovered.source, 99) < source_priority.get(
+                    existing.source, 99
+                ):
+                    seen[normalized] = discovered
             else:
-                self._url_dedup.mark_seen(normalized)
                 seen[normalized] = discovered
 
         return list(seen.values())

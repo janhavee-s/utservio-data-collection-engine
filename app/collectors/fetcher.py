@@ -159,6 +159,17 @@ class PageAnalyzer:
         if has_quality_issues:
             score += 25
 
+        # Detect minimal HTML (SPA shells with very little content)
+        soup = BeautifulSoup(html, "html.parser")
+        text_content = soup.get_text(strip=True)
+        has_minimal_content = len(text_content) < 200
+        has_only_scripts = len(soup.find_all("script")) > 0 and len(text_content) < 100
+
+        if has_minimal_content:
+            score += 30
+        if has_only_scripts:
+            score += 20
+
         needs_rendering = score >= 50
 
         return {
@@ -167,6 +178,7 @@ class PageAnalyzer:
             "has_framework": has_framework,
             "has_indicators": has_indicators,
             "has_quality_issues": has_quality_issues,
+            "has_minimal_content": has_minimal_content,
         }
 
     def _check_js_frameworks(self, html: str) -> bool:
@@ -202,8 +214,7 @@ class PlaywrightRenderer:
     INSTALL_INSTRUCTIONS = (
         "Playwright browser binaries are not installed.\n"
         "Run: playwright install chromium\n"
-        "Or:  pip install playwright && playwright install chromium\n"
-        "Docker: COPY the playwright cache or run 'playwright install' in Dockerfile"
+        "Or:  pip install playwright && playwright install chromium"
     )
 
     def __init__(self) -> None:
@@ -247,7 +258,11 @@ class PlaywrightRenderer:
                 ],
             )
             self._context = await self._browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
                 viewport={"width": 1920, "height": 1080},
             )
         return self._context
@@ -281,6 +296,409 @@ class PlaywrightRenderer:
             raise
         finally:
             await page.close()
+
+    async def render_with_api_interception(
+        self,
+        url: str,
+        *,
+        timeout: int = 30000,
+        api_patterns: list[str] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Render a page and intercept API calls to capture pricing data.
+
+        Returns (html, intercepted_responses) where intercepted_responses
+        contains JSON data from API calls matching the patterns.
+        """
+        if api_patterns is None:
+            api_patterns = [
+                "price", "pricing", "plan", "service", "product",
+                "api", "graphql", "data", "catalog", "offer",
+            ]
+
+        context = await self._ensure_browser()
+        page = await context.new_page()
+        intercepted_data: list[dict[str, Any]] = []
+
+        async def handle_response(response: Any) -> None:
+            """Capture JSON responses from API calls."""
+            try:
+                url_lower = response.url.lower()
+                content_type = response.headers.get("content-type", "")
+
+                # Check if response matches pricing patterns
+                is_api_call = any(pattern in url_lower for pattern in api_patterns)
+                is_json = "json" in content_type
+
+                if is_api_call and is_json:
+                    try:
+                        data = await response.json()
+                        if data:
+                            intercepted_data.append({
+                                "url": response.url,
+                                "status": response.status,
+                                "data": data,
+                            })
+                            logger.debug(
+                                "api_intercepted",
+                                url=response.url,
+                                status=response.status,
+                                data_type=type(data).__name__,
+                            )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        try:
+            page.on("response", handle_response)
+
+            await page.goto(url, wait_until="networkidle", timeout=timeout)
+
+            # Wait for dynamic content to load
+            await page.wait_for_timeout(3000)
+
+            html = str(await page.content())
+            logger.info(
+                "playwright_rendered_with_interception",
+                url=url,
+                html_length=len(html),
+                api_calls_captured=len(intercepted_data),
+            )
+            return html, intercepted_data
+        except Exception as e:
+            logger.error("playwright_render_failed", url=url, error=str(e))
+            raise
+        finally:
+            await page.close()
+
+    async def render_with_city_selection(
+        self,
+        url: str,
+        *,
+        timeout: int = 30000,
+        city: str = "Mumbai",
+        api_patterns: list[str] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Render a page with city selection automation.
+
+        Detects city selection UI, selects a city, and captures
+        API responses for pricing data. Also visits service pages
+        to collect pricing.
+        """
+        if api_patterns is None:
+            api_patterns = [
+                "price", "pricing", "plan", "service", "product",
+                "api", "graphql", "data", "catalog", "offer",
+            ]
+
+        context = await self._ensure_browser()
+        page = await context.new_page()
+        intercepted_data: list[dict[str, Any]] = []
+
+        async def handle_response(response: Any) -> None:
+            """Capture JSON responses from API calls."""
+            try:
+                url_lower = response.url.lower()
+                content_type = response.headers.get("content-type", "")
+
+                is_api_call = any(pattern in url_lower for pattern in api_patterns)
+                is_json = "json" in content_type
+
+                if is_api_call and is_json:
+                    try:
+                        data = await response.json()
+                        if data:
+                            intercepted_data.append({
+                                "url": response.url,
+                                "status": response.status,
+                                "data": data,
+                            })
+                            logger.debug(
+                                "api_intercepted_city_selection",
+                                url=response.url,
+                                status=response.status,
+                            )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        try:
+            page.on("response", handle_response)
+
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            await page.wait_for_timeout(2000)
+
+            # Try to detect and handle city selection
+            city_selected = await self._handle_city_selection(page, city, timeout)
+
+            if city_selected:
+                # Wait for page to reload with city data
+                await page.wait_for_timeout(3000)
+
+                # Collect pricing from service pages
+                service_pricing = await self._collect_service_pages_pricing(
+                    page, url, timeout
+                )
+                if service_pricing:
+                    intercepted_data.append({
+                        "url": f"{url}#service-pages",
+                        "status": 200,
+                        "data": {"pricing": service_pricing},
+                    })
+
+            html = str(await page.content())
+            logger.info(
+                "playwright_rendered_with_city_selection",
+                url=url,
+                html_length=len(html),
+                city_selected=city_selected,
+                api_calls_captured=len(intercepted_data),
+            )
+            return html, intercepted_data
+        except Exception as e:
+            logger.error("playwright_render_failed", url=url, error=str(e))
+            raise
+        finally:
+            await page.close()
+
+    async def _handle_city_selection(
+        self, page: Any, target_city: str, timeout: int
+    ) -> bool:
+        """Detect and handle city selection UI.
+
+        Returns True if city was selected and page reloaded.
+        """
+        try:
+            # Common city selection selectors
+            city_selectors = [
+                # Button/link with city text
+                f'button:has-text("{target_city}")',
+                f'a:has-text("{target_city}")',
+                # Dropdown/select elements
+                'select[name*="city"]',
+                'select[id*="city"]',
+                '[data-testid*="city"]',
+                '[class*="city-selector"]',
+                '[class*="location-selector"]',
+                # Modal/popup city selection
+                '[class*="modal"] button',
+                '[class*="popup"] button',
+                # Common patterns
+                '[class*="location"] button',
+                '[class*="city"] button',
+                'button[data-city]',
+                f'li:has-text("{target_city}")',
+            ]
+
+            for selector in city_selectors:
+                try:
+                    element = await page.query_selector(selector)
+                    if element:
+                        # Check if it's visible
+                        is_visible = await element.is_visible()
+                        if not is_visible:
+                            continue
+
+                        # Check if it contains target city text
+                        text = await element.inner_text()
+                        if target_city.lower() in text.lower():
+                            logger.info(
+                                "city_selection_found",
+                                selector=selector,
+                                city=target_city,
+                            )
+                            await element.click()
+                            await page.wait_for_timeout(2000)
+                            return True
+                except Exception:
+                    continue
+
+            # Try to find city input field and type city name
+            input_selectors = [
+                'input[placeholder*="city"]',
+                'input[placeholder*="location"]',
+                'input[name*="city"]',
+                'input[id*="city"]',
+                'input[aria-label*="city"]',
+            ]
+
+            for selector in input_selectors:
+                try:
+                    input_elem = await page.query_selector(selector)
+                    if input_elem:
+                        is_visible = await input_elem.is_visible()
+                        if is_visible:
+                            await input_elem.fill(target_city)
+                            await page.wait_for_timeout(1000)
+
+                            # Try to find and click the first suggestion
+                            suggestion_selectors = [
+                                f'li:has-text("{target_city}")',
+                                f'div:has-text("{target_city}")',
+                                '[class*="suggestion"]',
+                                '[class*="dropdown-item"]',
+                            ]
+
+                            for sug_selector in suggestion_selectors:
+                                try:
+                                    suggestion = await page.query_selector(sug_selector)
+                                    if suggestion:
+                                        await suggestion.click()
+                                        await page.wait_for_timeout(2000)
+                                        return True
+                                except Exception:
+                                    continue
+                except Exception:
+                    continue
+
+            logger.debug("city_selection_not_found", url=page.url, target_city=target_city)
+            return False
+
+        except Exception as e:
+            logger.debug("city_selection_error", error=str(e))
+            return False
+
+    async def _collect_service_pages_pricing(
+        self, page: Any, base_url: str, timeout: int
+    ) -> list[dict[str, Any]]:
+        """Navigate to service pages and collect pricing data."""
+        import re
+        from urllib.parse import urljoin
+        
+        pricing_data = []
+        
+        try:
+            # Find all service links
+            links = await page.query_selector_all('a[href]')
+            service_links = []
+            
+            for link in links:
+                href = await link.get_attribute('href')
+                text = await link.inner_text()
+                
+                if not href or not text:
+                    continue
+                
+                # Filter for service-like links
+                href_lower = href.lower()
+                text_lower = text.lower()
+                
+                # Skip non-service links
+                if any(skip in href_lower for skip in [
+                    'about', 'faq', 'contact', 'blog', 'career',
+                    'privacy', 'terms', 'login', 'signup', 'download',
+                    'javascript', 'mailto', 'tel:', '#', 'onelink',
+                    'app-store', 'google-play', 'apps.apple',
+                ]):
+                    continue
+                
+                # Skip non-service text
+                if any(skip in text_lower for skip in [
+                    'download', 'app', 'play store', 'apple store',
+                    'follow', 'social', 'facebook', 'twitter', 'instagram',
+                    'linkedin', 'youtube', 'view all',
+                ]):
+                    continue
+                
+                # Check if it looks like a service link
+                if (len(text) > 2 and len(text) < 50 and 
+                    not href.startswith('http') or 'snabbit' in href_lower or 'pronto' in href_lower):
+                    full_url = urljoin(base_url, href)
+                    # Clean service name
+                    clean_name = text.strip().replace('→', '').replace('›', '').strip()
+                    
+                    # Skip location pages (contain city names in URL)
+                    location_keywords = [
+                        '/mumbai/', '/delhi/', '/bangalore/', '/pune/',
+                        '/hyderabad/', '/chennai/', '/kolkata/', '/gurgaon/',
+                        '/noida/', '/thane/', '/navi-mumbai/', '/ghaziabad/',
+                        '/house-help/', '/locality/', '/area/',
+                        'andheri', 'powai', 'borivali', 'malad',
+                        'whitefield', 'koramangala', 'indiranagar',
+                        'sector-', 'phase-', 'layout-',
+                    ]
+                    if any(loc in href_lower for loc in location_keywords):
+                        continue
+                    
+                    # Skip if service name looks like a city or location
+                    city_names = [
+                        'mumbai', 'delhi', 'bangalore', 'bengaluru', 'pune',
+                        'hyderabad', 'chennai', 'kolkata', 'gurgaon', 'gurugram',
+                        'noida', 'thane', 'jaipur', 'lucknow', 'ahmedabad',
+                        'ghaziabad', 'faridabad', 'meerut', 'agra',
+                    ]
+                    if any(city in clean_name.lower() for city in city_names):
+                        continue
+                    
+                    if clean_name:
+                        service_links.append({'url': full_url, 'name': clean_name})
+            
+            logger.info(
+                "service_links_found",
+                count=len(service_links),
+                base_url=base_url,
+            )
+            
+            # Deduplicate service links
+            seen_services: set[str] = set()
+            unique_service_links = []
+            for service in service_links:
+                if service['name'] not in seen_services:
+                    seen_services.add(service['name'])
+                    unique_service_links.append(service)
+            service_links = unique_service_links
+            
+            # Visit each service page and extract pricing
+            for service in service_links[:10]:  # Limit to 10 services
+                try:
+                    await page.goto(service['url'], wait_until='domcontentloaded', timeout=timeout)
+                    await page.wait_for_timeout(2000)
+                    
+                    html = await page.content()
+                    
+                    # Extract prices from HTML
+                    prices = re.findall(r'₹\s*([\d,]+)', html)
+                    
+                    if prices:
+                        # Get the most common price
+                        from collections import Counter
+                        price_counter = Counter(prices)
+                        most_common_price = price_counter.most_common(1)[0][0]
+                        
+                        # Clean price string
+                        price_str = most_common_price.replace(',', '')
+                        try:
+                            base_price = float(price_str)
+                        except ValueError:
+                            continue
+                        
+                        pricing_data.append({
+                            'service_name': service['name'],
+                            'base_price': base_price,
+                            'currency': 'INR',
+                            'source': 'service_page',
+                        })
+                        
+                        logger.debug(
+                            "service_pricing_extracted",
+                            service=service['name'],
+                            price=base_price,
+                            url=service['url'],
+                        )
+                
+                except Exception as e:
+                    logger.debug(
+                        "service_page_fetch_failed",
+                        url=service['url'],
+                        error=str(e),
+                    )
+                    continue
+        
+        except Exception as e:
+            logger.debug("service_pages_collection_error", error=str(e))
+        
+        return pricing_data
 
     async def close(self) -> None:
         """Clean up browser resources."""
@@ -352,6 +770,10 @@ class HttpCacheLayer:
     def get(self, url: str) -> CacheEntry | None:
         """Retrieve cached metadata for a URL."""
         return self._cache.get(url)
+
+    def invalidate(self, url: str) -> None:
+        """Remove cached metadata for a URL (e.g., after Playwright render)."""
+        self._cache.pop(url, None)
 
     def store(
         self,
@@ -602,6 +1024,8 @@ class HybridFetcher:
                 class_result = classifier.classify(dynamic_result.html, url)
                 dynamic_result.page_type = class_result.page_type
                 dynamic_result.page_type_confidence = class_result.confidence
+
+                self._cache_layer.invalidate(url)
             return dynamic_result
         except Exception as e:
             logger.warning(
@@ -693,7 +1117,7 @@ class HybridFetcher:
                     logger.info("conditional_get_304", url=url)
                     cached = self._cache_layer.get(url)
                     return FetchResult(
-                        html=cached.content_hash if cached else "",
+                        html="",
                         url=url,
                         method="httpx",
                         status_code=304,
@@ -829,6 +1253,58 @@ class HybridFetcher:
             content_length=len(html),
             js_rendered=True,
         )
+
+    async def _fetch_dynamic_with_interception(
+        self, url: str, api_patterns: list[str] | None = None
+    ) -> tuple[FetchResult, list[dict[str, Any]]]:
+        """Fetch page using Playwright with API interception."""
+        await self._rate_limiter.acquire()
+
+        renderer = await self._get_renderer()
+        settings = get_settings().collector
+        html, intercepted = await renderer.render_with_api_interception(
+            url,
+            timeout=settings.playwright_timeout,
+            api_patterns=api_patterns,
+        )
+
+        result = FetchResult(
+            html=html,
+            url=url,
+            method="playwright",
+            status_code=200,
+            content_length=len(html),
+            js_rendered=True,
+        )
+        return result, intercepted
+
+    async def _fetch_dynamic_with_city_selection(
+        self,
+        url: str,
+        city: str = "Mumbai",
+        api_patterns: list[str] | None = None,
+    ) -> tuple[FetchResult, list[dict[str, Any]]]:
+        """Fetch page using Playwright with city selection automation."""
+        await self._rate_limiter.acquire()
+
+        renderer = await self._get_renderer()
+        settings = get_settings().collector
+        html, intercepted = await renderer.render_with_city_selection(
+            url,
+            timeout=settings.playwright_timeout,
+            city=city,
+            api_patterns=api_patterns,
+        )
+
+        result = FetchResult(
+            html=html,
+            url=url,
+            method="playwright",
+            status_code=200,
+            content_length=len(html),
+            js_rendered=True,
+        )
+        return result, intercepted
 
     async def close(self) -> None:
         """Clean up all resources."""

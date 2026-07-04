@@ -10,6 +10,7 @@ from app.database.connection import Base
 from app.database.models import (  # noqa: F401
     CollectionLog,
     Competitor,
+    CompetitorCompanyInfo,
     CompetitorContent,
     CompetitorPage,
     CompetitorPricing,

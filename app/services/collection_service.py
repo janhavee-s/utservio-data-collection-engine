@@ -70,67 +70,34 @@ class CollectionService:
                     sources=self._count_sources(discovered),
                 )
 
-                for d in discovered:
-                    existing = await source_repo.get_by_url(competitor_id, d.url)
-                    if not existing:
-                        await source_repo.create(
-                            competitor_id=competitor_id,
-                            url=d.url,
-                            page_type=self._classify_url(d.url),
-                        )
-                    else:
-                        await source_repo.mark_crawled(existing.id)
+                # Batch upsert source records (fix N+1)
+                await self._batch_upsert_sources(
+                    source_repo, competitor_id, discovered, log
+                )
 
                 results: dict[str, Any] = {}
                 errors: list[str] = []
                 records_collected = 0
-                skipped_urls: list[str] = []
 
-                for module in modules:
-                    if module == "discovery":
-                        results[module] = [{"status": "completed", "source": "DiscoveryEngine"}]
-                        continue
+                # Process modules sequentially to avoid session/transaction conflicts
+                # Separate discovery from other modules
+                other_modules = [m for m in modules if m != "discovery"]
+                if "discovery" in modules:
+                    results["discovery"] = [{"status": "completed", "source": "DiscoveryEngine"}]
 
-                    collector = self._get_collector(module)
-                    if not collector:
-                        log.warning("unknown_module", module=module)
-                        continue
-
-                    urls_to_fetch = self._select_urls_for_module(module, discovered_urls, base_url)
-
-                    if not urls_to_fetch:
-                        log.info("no_urls_for_module", module=module)
-                        skipped_urls.append(f"{module}: no matching URLs")
-                        results[module] = []
-                        continue
-
-                    log.info(
-                        "module_fetching_urls",
-                        module=module,
-                        url_count=len(urls_to_fetch),
-                        urls=urls_to_fetch[:5],
-                    )
-
-                    module_results = []
-                    for url in urls_to_fetch:
-                        try:
-                            result = await collector.collect(competitor_id, url, session=session)
-                            module_results.append(result)
-                            if result.get("status") == "success":
-                                records_collected += sum(
-                                    v for v in result.values() if isinstance(v, int) and v > 0
-                                )
-                        except Exception as e:
-                            log.error(
-                                "module_collection_failed",
-                                module=module,
-                                url=url,
-                                error=str(e),
-                            )
-                            module_results.append({"status": "failed", "error": str(e)})
-                            errors.append(f"{module}/{url}: {e!s}")
-
-                    results[module] = module_results
+                # Collect modules one at a time (session cannot be shared concurrently)
+                for module in other_modules:
+                    try:
+                        module_results, module_records, module_errors = await self._collect_module(
+                            module, competitor_id, discovered_urls, base_url, session, log
+                        )
+                        results[module] = module_results
+                        records_collected += module_records
+                        errors.extend(module_errors)
+                    except Exception as e:
+                        log.error("module_collection_failed", module=module, error=str(e))
+                        results[module] = [{"status": "failed", "error": str(e)}]
+                        errors.append(f"{module}: {e!s}")
 
                 elapsed = round(time.time() - start_time, 2)
 
@@ -171,6 +138,87 @@ class CollectionService:
                 "error": str(e),
                 "elapsed_seconds": elapsed,
             }
+
+    async def _collect_module(
+        self,
+        module: str,
+        competitor_id: int,
+        discovered_urls: list[str],
+        base_url: str,
+        session: Any,
+        log: Any,
+    ) -> tuple[list[dict[str, Any]], int, list[str]]:
+        """Collect data for a single module, fetching URLs sequentially."""
+        collector = self._get_collector(module)
+        if not collector:
+            log.warning("unknown_module", module=module)
+            return [], 0, []
+
+        urls_to_fetch = self._select_urls_for_module(module, discovered_urls, base_url)
+
+        if not urls_to_fetch:
+            log.info("no_urls_for_module", module=module)
+            return [], 0, []
+
+        log.info(
+            "module_fetching_urls",
+            module=module,
+            url_count=len(urls_to_fetch),
+            urls=urls_to_fetch[:5],
+        )
+
+        async def fetch_url(url: str) -> dict[str, Any]:
+            savepoint = await session.begin_nested()
+            try:
+                result: dict[str, Any] = await collector.collect(competitor_id, url, session=session)
+                await savepoint.commit()
+                return result
+            except Exception as e:
+                await savepoint.rollback()
+                log.error(
+                    "module_collection_failed",
+                    module=module,
+                    url=url,
+                    error=str(e),
+                )
+                return {"status": "failed", "error": str(e)}
+
+        # Fetch URLs sequentially to avoid savepoint conflicts on shared session
+        module_results: list[dict[str, Any]] = []
+        for url in urls_to_fetch:
+            result = await fetch_url(url)
+            module_results.append(result)
+
+        # Calculate records and errors
+        records = 0
+        errors = []
+        for result, url in zip(module_results, urls_to_fetch, strict=True):
+            if result.get("status") == "success":
+                records += sum(
+                    v for v in result.values() if isinstance(v, int) and v > 0
+                )
+            elif result.get("status") == "failed":
+                errors.append(f"{module}/{url}: {result.get('error', 'unknown')}")
+
+        return list(module_results), records, errors
+
+    async def _batch_upsert_sources(
+        self,
+        source_repo: CompetitorSourceRepository,
+        competitor_id: int,
+        discovered: list[Any],
+        log: Any,
+    ) -> None:
+        """Batch upsert source records to avoid N+1 queries."""
+        if not discovered:
+            return
+
+        for d in discovered:
+            await source_repo.upsert(
+                competitor_id=competitor_id,
+                url=d.url,
+                page_type=self._classify_url(d.url),
+            )
 
     def _select_urls_for_module(
         self, module: str, discovered_urls: list[str], base_url: str

@@ -4,7 +4,14 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS
+from app.parsers.strategies.shared import (
+    SOCIAL_PLATFORM_DOMAINS,
+    detect_countries,
+    detect_currency_from_url,
+    is_valid_content_title,
+    is_valid_service_name,
+    parse_price,
+)
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 SCHEMA_ORG_TYPES = {
@@ -52,13 +59,17 @@ class JsonLdStrategy(ParsingStrategy):
         if item_type in ("LocalBusiness", "Organization", "Corporation", "Company"):
             self._extract_organization(item, result, url)
         elif item_type in ("Service",):
-            self._extract_service(item, result)
+            self._extract_service(item, result, url)
         elif item_type in ("Product", "Offer"):
-            self._extract_product(item, result)
-        elif item_type in ("Article", "BlogPosting"):
+            self._extract_product(item, result, url)
+        elif item_type in ("Article", "BlogPosting", "NewsArticle"):
             self._extract_article(item, result, url)
-        elif item_type in ("WebPage", "ContactPage"):
+        elif item_type in ("WebPage", "ContactPage", "AboutPage"):
             self._extract_webpage(item, result, url)
+        elif item_type == "ItemList":
+            for child in item.get("itemListElement", []):
+                if isinstance(child, dict):
+                    self._process_item(child, result, url)
         for child in item.get("hasPart", []):
             if isinstance(child, dict):
                 self._process_item(child, result, url)
@@ -79,6 +90,10 @@ class JsonLdStrategy(ParsingStrategy):
                 result.logo = urljoin(url, logo.get("url", ""))
         if not result.industry:
             result.industry = item.get("industry")
+            if not result.industry:
+                area = item.get("areaServed")
+                if isinstance(area, str):
+                    result.industry = area
         if not result.headquarters:
             addr = item.get("address", {})
             if isinstance(addr, dict):
@@ -91,11 +106,24 @@ class JsonLdStrategy(ParsingStrategy):
         if not result.contact_email:
             email = item.get("email")
             if isinstance(email, str):
-                result.contact_email = email
+                result.contact_email = email.replace("mailto:", "")
         if not result.contact_phone:
             phone = item.get("telephone")
             if isinstance(phone, str):
-                result.contact_phone = phone
+                result.contact_phone = phone.replace("tel:", "")
+
+        # Extract operating countries from areaServed
+        area = item.get("areaServed", [])
+        if isinstance(area, str):
+            area = [area]
+        if isinstance(area, list):
+            for a in area:
+                if isinstance(a, str):
+                    countries = detect_countries(a)
+                    for c in countries:
+                        if c not in result.social_links:
+                            result.social_links[f"country:{c}"] = ""
+
         for key in ("sameAs",):
             urls = item.get(key, [])
             if isinstance(urls, str):
@@ -106,45 +134,85 @@ class JsonLdStrategy(ParsingStrategy):
                     if platform and platform not in result.social_links:
                         result.social_links[platform] = link
 
-    def _extract_service(self, item: dict[str, Any], result: ParsedResult) -> None:
+    def _extract_service(self, item: dict[str, Any], result: ParsedResult, url: str) -> None:
         name = item.get("name", "")
+        if not is_valid_service_name(name):
+            return
+        duration = item.get("duration") or item.get("estimatedDuration")
+        provider = item.get("provider", {})
+        provider_name = provider.get("name") if isinstance(provider, dict) else None
+        category = item.get("category") or provider_name
+        currency = detect_currency_from_url(url)
+
+        # Extract price from offers if present
+        offers = item.get("offers", {})
+        starting_price = None
+        if isinstance(offers, dict):
+            price_val = offers.get("price") or offers.get("lowPrice")
+            starting_price = parse_price(str(price_val)) if price_val else None
+        elif isinstance(offers, list) and offers:
+            first_offer = offers[0]
+            if isinstance(first_offer, dict):
+                price_val = first_offer.get("price") or first_offer.get("lowPrice")
+                starting_price = parse_price(str(price_val)) if price_val else None
+
         result.services.append(
             {
                 "name": name,
                 "description": item.get("description"),
-                "category": item.get("category"),
-                "starting_price": None,
-                "currency": "USD",
-                "estimated_duration": None,
+                "category": category,
+                "starting_price": starting_price,
+                "currency": currency,
+                "estimated_duration": str(duration) if duration else None,
             }
         )
 
-    def _extract_product(self, item: dict[str, Any], result: ParsedResult) -> None:
+    def _extract_product(self, item: dict[str, Any], result: ParsedResult, url: str) -> None:
         name = item.get("name", "")
+        if not is_valid_service_name(name):
+            return
         offers = item.get("offers", {})
+        currency = detect_currency_from_url(url)
         if isinstance(offers, dict):
-            price = offers.get("price")
-            currency = offers.get("priceCurrency", "USD")
+            price = offers.get("price") or offers.get("lowPrice")
+            offer_currency = offers.get("priceCurrency", currency)
+            if offer_currency and offer_currency != "USD":
+                currency = offer_currency
+            promotional_price = offers.get("salePrice")
+            base_price = parse_price(str(price)) if price else None
+            promo_price = parse_price(str(promotional_price)) if promotional_price else None
+            discount = None
+            if base_price and promo_price and base_price > 0:
+                discount = round((1 - promo_price / base_price) * 100, 1)
+
             result.pricing.append(
                 {
                     "service_name": name,
                     "category": item.get("category"),
-                    "base_price": float(price) if price else None,
-                    "promotional_price": None,
+                    "base_price": base_price,
+                    "promotional_price": promo_price,
                     "currency": currency,
-                    "discount": None,
+                    "discount": discount,
                     "subscription_plans": {},
                     "membership_pricing": None,
                 }
             )
 
     def _extract_article(self, item: dict[str, Any], result: ParsedResult, url: str) -> None:
+        title = item.get("headline") or item.get("name")
+        if not is_valid_content_title(title):
+            return
+        article_url = item.get("url")
+        if article_url:
+            article_url = urljoin(url, article_url)
+        else:
+            article_url = url
         result.content.append(
             {
-                "title": item.get("headline"),
+                "title": title,
                 "author": self._extract_author(item),
                 "publish_date": item.get("datePublished"),
-                "url": urljoin(url, item.get("url", "")),
+                "url": article_url,
                 "summary": item.get("description"),
                 "content_type": "article",
             }
@@ -162,6 +230,12 @@ class JsonLdStrategy(ParsingStrategy):
             return author
         if isinstance(author, dict):
             return author.get("name")
+        if isinstance(author, list) and author:
+            first = author[0]
+            if isinstance(first, dict):
+                return first.get("name")
+            if isinstance(first, str):
+                return first
         return None
 
     def _detect_platform(self, url: str) -> str | None:

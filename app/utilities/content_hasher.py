@@ -9,6 +9,42 @@ import re
 from typing import Any
 
 
+def _strip_dynamic_elements(html: str) -> str:
+    """Strip dynamic elements from HTML before hashing.
+
+    Removes:
+    - CSRF tokens and form fields
+    - Session IDs and auth tokens
+    - Timestamps and datetime strings
+    - UUIDs and random tokens
+    - Analytics and tracking scripts
+    - Inline comments with timestamps
+    """
+    # Remove CSRF tokens (various formats)
+    html = re.sub(r'name=["\']csrf_token["\'][^>]*value=["\'][^"\']+["\']', '', html)
+    html = re.sub(r'<meta\s+name=["\']csrf-token["\'][^>]*>', '', html)
+    html = re.sub(r'<input[^>]*name=["\']_token["\'][^>]*>', '', html)
+
+    # Remove session IDs and auth tokens
+    html = re.sub(r'session_id["\']?\s*[:=]\s*["\'][a-zA-Z0-9]+["\']', '', html)
+    html = re.sub(r'access_token["\']?\s*[:=]\s*["\'][a-zA-Z0-9]+["\']', '', html)
+
+    # Remove timestamps and datetime strings
+    html = re.sub(r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}', '', html)
+    html = re.sub(r'\d{10,13}', '', html)  # Unix timestamps
+
+    # Remove UUIDs
+    html = re.sub(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', '', html)
+
+    # Remove analytics and tracking scripts
+    html = re.sub(r'<script[^>]*>([^<]*(?:gtag|analytics|tracking|pixel)[^<]*)</script>', '', html, flags=re.IGNORECASE)
+
+    # Remove data-nosnippet and noindex directives
+    html = re.sub(r'<meta[^>]*robots=["\'][^"\']*noindex[^"\']*["\']', '', html)
+
+    return html
+
+
 def _canonicalize_value(value: Any) -> str:
     """Convert a value to a canonical string representation."""
     if value is None:
@@ -52,8 +88,12 @@ def compute_content_hash(*fields: Any) -> str:
 
 
 def compute_page_content_hash(html: str, url: str) -> str:
-    """Compute content hash for a raw page snapshot."""
-    return compute_content_hash(html, url)
+    """Compute content hash for a raw page snapshot.
+
+    Strips dynamic elements before hashing to improve incremental caching.
+    """
+    stripped_html = _strip_dynamic_elements(html)
+    return compute_content_hash(stripped_html, url)
 
 
 def compute_service_hash(

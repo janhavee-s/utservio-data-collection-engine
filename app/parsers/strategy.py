@@ -21,22 +21,45 @@ class ParsedResult:
     social_profiles: list[dict[str, str | None]] = field(default_factory=list)
     confidence: float = 0.0
     strategy_results: dict[str, float] = field(default_factory=dict)
+    _field_weights: dict[str, float] = field(default_factory=dict, repr=False)
+
+    def _should_replace(self, field_name: str, new_weight: float) -> bool:
+        """Determine if a new value should replace the existing one based on strategy weight."""
+        current_weight = self._field_weights.get(field_name, 0.0)
+        return new_weight > current_weight
 
     def merge(self, other: "ParsedResult", strategy_name: str, weight: float) -> None:
-        if other.company_name and not self.company_name:
-            self.company_name = other.company_name
-        if other.description and not self.description:
-            self.description = other.description
-        if other.logo and not self.logo:
-            self.logo = other.logo
-        if other.industry and not self.industry:
-            self.industry = other.industry
-        if other.headquarters and not self.headquarters:
-            self.headquarters = other.headquarters
-        if other.contact_email and not self.contact_email:
-            self.contact_email = other.contact_email
-        if other.contact_phone and not self.contact_phone:
-            self.contact_phone = other.contact_phone
+        # Scalar fields: replace if new strategy has higher weight
+        if other.company_name:
+            if self._should_replace("company_name", weight):
+                self.company_name = other.company_name
+                self._field_weights["company_name"] = weight
+        if other.description:
+            if self._should_replace("description", weight):
+                self.description = other.description
+                self._field_weights["description"] = weight
+        if other.logo:
+            if self._should_replace("logo", weight):
+                self.logo = other.logo
+                self._field_weights["logo"] = weight
+        if other.industry:
+            if self._should_replace("industry", weight):
+                self.industry = other.industry
+                self._field_weights["industry"] = weight
+        if other.headquarters:
+            if self._should_replace("headquarters", weight):
+                self.headquarters = other.headquarters
+                self._field_weights["headquarters"] = weight
+        if other.contact_email:
+            if self._should_replace("contact_email", weight):
+                self.contact_email = other.contact_email
+                self._field_weights["contact_email"] = weight
+        if other.contact_phone:
+            if self._should_replace("contact_phone", weight):
+                self.contact_phone = other.contact_phone
+                self._field_weights["contact_phone"] = weight
+
+        # List fields: deduplicate and merge
         if other.social_links:
             for k, v in other.social_links.items():
                 if k not in self.social_links:
@@ -65,8 +88,33 @@ class ParsedResult:
                 if profile.get("platform") and profile["platform"] not in existing_platforms:
                     self.social_profiles.append(profile)
                     existing_platforms.add(profile["platform"])
+
         self.strategy_results[strategy_name] = weight
-        self.confidence = min(1.0, self.confidence + weight)
+        self._recalculate_confidence()
+
+    def _recalculate_confidence(self) -> None:
+        """Calculate confidence based on fraction of fields populated, weighted by strategy quality."""
+        scalar_fields = [
+            "company_name", "description", "logo", "industry",
+            "headquarters", "contact_email", "contact_phone",
+        ]
+        populated = sum(1 for f in scalar_fields if getattr(self, f))
+        list_fields = ["services", "pricing", "content", "social_profiles", "social_links"]
+        populated += sum(1 for f in list_fields if getattr(self, f))
+
+        total_fields = len(scalar_fields) + len(list_fields)
+        if total_fields == 0:
+            self.confidence = 0.0
+            return
+
+        # Base confidence from field coverage
+        field_coverage = populated / total_fields
+
+        # Bonus from strategy weight (higher-weight strategies contribute more)
+        weight_bonus = sum(self.strategy_results.values()) / max(len(self.strategy_results), 1)
+
+        # Combined confidence: 70% field coverage + 30% strategy quality
+        self.confidence = min(1.0, (field_coverage * 0.7) + (weight_bonus * 0.3))
 
     def to_company_dict(self) -> dict[str, Any]:
         return {

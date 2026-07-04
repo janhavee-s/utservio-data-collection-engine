@@ -1,4 +1,7 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import CompetitorSocial, SocialPlatform
@@ -35,26 +38,35 @@ class CompetitorSocialRepository(BaseRepository):
         profile_url: str,
         username: str | None = None,
     ) -> tuple[CompetitorSocial, bool]:
-        """Insert or update a social profile.
-
-        Returns (row, was_created) where was_created is True if a new record was inserted.
-        """
-        existing = await self.get_by_platform(competitor_id, platform)
-        if existing:
-            existing.profile_url = profile_url
-            existing.username = username
-            await self._session.flush()
-            return existing, False
-        row = await self.create(
-            competitor_id=competitor_id,
-            platform=platform,
-            profile_url=profile_url,
-            username=username,
+        """Insert or update a social profile using atomic PostgreSQL upsert."""
+        stmt = (
+            insert(CompetitorSocial)
+            .values(
+                competitor_id=competitor_id,
+                platform=platform,
+                profile_url=profile_url,
+                username=username,
+            )
+            .on_conflict_do_update(
+                index_elements=["competitor_id", "platform"],
+                set_={
+                    "profile_url": profile_url,
+                    "username": username,
+                    "collected_at": datetime.now(UTC),
+                },
+            )
+            .returning(CompetitorSocial)
         )
-        return row, True
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        row = result.scalar_one()
+        return row, row.profile_url == profile_url
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
-        profiles = await self.get_by_competitor(competitor_id)
-        for profile in profiles:
-            await self._session.delete(profile)
+        from sqlalchemy import delete
+
+        stmt = delete(CompetitorSocial).where(
+            CompetitorSocial.competitor_id == competitor_id
+        )
+        await self._session.execute(stmt)
         await self._session.flush()

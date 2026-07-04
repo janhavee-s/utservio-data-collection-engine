@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import CompetitorPricing
@@ -32,15 +33,6 @@ class CompetitorPricingRepository(BaseRepository):
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_by_hash(self, competitor_id: int, content_hash: str) -> CompetitorPricing | None:
-        """Find a pricing entry by its content hash within a competitor scope."""
-        stmt = select(CompetitorPricing).where(
-            CompetitorPricing.competitor_id == competitor_id,
-            CompetitorPricing.content_hash == content_hash,
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()
-
     async def upsert(
         self,
         competitor_id: int,
@@ -54,31 +46,46 @@ class CompetitorPricingRepository(BaseRepository):
         membership_pricing: dict[str, object] | None = None,
         subscription_plans: list[str] | None = None,
     ) -> tuple[CompetitorPricing, bool]:
-        """Insert or update a pricing entry based on content hash.
-
-        Returns (row, was_created) where was_created is True if a new record was inserted.
-        """
-        existing = await self.get_by_hash(competitor_id, content_hash)
-        if existing:
-            existing.collected_at = datetime.now(UTC)
-            await self._session.flush()
-            return existing, False
-        row = await self.create(
-            competitor_id=competitor_id,
-            content_hash=content_hash,
-            service_name=service_name,
-            category=category,
-            base_price=base_price,
-            promotional_price=promotional_price,
-            currency=currency,
-            discount=discount,
-            membership_pricing=membership_pricing,
-            subscription_plans=subscription_plans or [],
+        """Insert or update a pricing entry using atomic PostgreSQL upsert."""
+        stmt = (
+            insert(CompetitorPricing)
+            .values(
+                competitor_id=competitor_id,
+                content_hash=content_hash,
+                service_name=service_name,
+                category=category,
+                base_price=base_price,
+                promotional_price=promotional_price,
+                currency=currency,
+                discount=discount,
+                membership_pricing=membership_pricing,
+                subscription_plans=subscription_plans or [],
+            )
+            .on_conflict_do_update(
+                index_elements=["competitor_id", "service_name"],
+                set_={
+                    "category": category,
+                    "base_price": base_price,
+                    "promotional_price": promotional_price,
+                    "currency": currency,
+                    "discount": discount,
+                    "membership_pricing": membership_pricing,
+                    "subscription_plans": subscription_plans or [],
+                    "collected_at": datetime.now(UTC),
+                },
+            )
+            .returning(CompetitorPricing)
         )
-        return row, True
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        row = result.scalar_one()
+        return row, row.content_hash == content_hash
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
-        pricing = await self.get_by_competitor(competitor_id)
-        for item in pricing:
-            await self._session.delete(item)
+        from sqlalchemy import delete
+
+        stmt = delete(CompetitorPricing).where(
+            CompetitorPricing.competitor_id == competitor_id
+        )
+        await self._session.execute(stmt)
         await self._session.flush()

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import CompetitorSource
@@ -39,6 +40,35 @@ class CompetitorSourceRepository(BaseRepository):
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def upsert(
+        self,
+        competitor_id: int,
+        url: str,
+        page_type: str | None = None,
+    ) -> CompetitorSource:
+        """Insert or update a source using atomic PostgreSQL upsert."""
+        stmt = (
+            insert(CompetitorSource)
+            .values(
+                competitor_id=competitor_id,
+                url=url,
+                page_type=page_type,
+                is_active=True,
+            )
+            .on_conflict_do_update(
+                index_elements=["competitor_id", "url"],
+                set_={
+                    "page_type": page_type,
+                    "last_crawled_at": datetime.now(UTC),
+                    "is_active": True,
+                },
+            )
+            .returning(CompetitorSource)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return result.scalar_one()
 
     async def deactivate(self, source_id: int) -> CompetitorSource | None:
         return await self.update(source_id, is_active=False)

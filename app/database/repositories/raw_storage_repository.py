@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import CollectionStatus, RawStorage
@@ -50,31 +51,41 @@ class RawStorageRepository(BaseRepository):
     ) -> RawStorage:
         """Insert or update raw storage based on URL.
 
-        If an entry with the same URL exists, update its HTML and metadata.
-        Otherwise, create a new record.
+        Uses PostgreSQL ON CONFLICT for atomic upsert to avoid race conditions.
         """
-        existing = await self.get_by_url(competitor_id, source_url)
-        if existing:
-            existing.raw_html = raw_html
-            existing.raw_json = raw_json
-            existing.metadata_ = metadata
-            existing.content_hash = content_hash
-            existing.collection_status = collection_status
-            existing.collected_at = datetime.now(UTC)
-            await self._session.flush()
-            return existing
-        return await self.create(  # type: ignore[no-any-return]
-            competitor_id=competitor_id,
-            source_url=source_url,
-            content_hash=content_hash,
-            raw_html=raw_html,
-            raw_json=raw_json,
-            metadata_=metadata,
-            collection_status=collection_status,
+        stmt = (
+            insert(RawStorage)
+            .values(
+                competitor_id=competitor_id,
+                source_url=source_url,
+                content_hash=content_hash,
+                raw_html=raw_html,
+                raw_json=raw_json,
+                metadata_=metadata,
+                collection_status=collection_status,
+            )
+            .on_conflict_do_update(
+                index_elements=["competitor_id", "source_url"],
+                set_={
+                    "content_hash": content_hash,
+                    "raw_html": raw_html,
+                    "raw_json": raw_json,
+                    "metadata": metadata,
+                    "collection_status": collection_status,
+                    "collected_at": datetime.now(UTC),
+                },
+            )
+            .returning(RawStorage)
         )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return result.scalar_one()
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
-        items = await self.get_by_competitor(competitor_id)
-        for item in items:
-            await self._session.delete(item)
+        from sqlalchemy import delete
+
+        stmt = delete(RawStorage).where(
+            RawStorage.competitor_id == competitor_id
+        )
+        await self._session.execute(stmt)
         await self._session.flush()

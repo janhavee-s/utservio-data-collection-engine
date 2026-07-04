@@ -182,7 +182,22 @@ class DiscoveryEngine:
                 logger.debug("page_fetch_failed", url=url, status=response.status_code)
                 return urls
 
-            soup = BeautifulSoup(response.text, "html.parser")
+            html = response.text
+
+            # Check if page is a SPA and needs Playwright rendering
+            from app.collectors.fetcher import PageAnalyzer
+            analyzer = PageAnalyzer()
+            analysis = analyzer.analyze(html)
+            if analysis["needs_rendering"]:
+                logger.info("discovery_playwright_fallback", url=url, score=analysis["score"])
+                try:
+                    from app.collectors.fetcher import PlaywrightRenderer
+                    renderer = PlaywrightRenderer()
+                    html = await renderer.render(url)
+                except Exception as e:
+                    logger.debug("discovery_playwright_failed", url=url, error=str(e))
+
+            soup = BeautifulSoup(html, "html.parser")
 
             if self._settings.parse_nav:
                 nav_urls = self._extract_nav_links(soup, url)
@@ -198,6 +213,11 @@ class DiscoveryEngine:
 
             meta_urls = self._extract_meta_links(soup, url)
             urls.extend(meta_urls)
+
+            # If no nav/footer found (SPA with div-based layout), extract all internal links
+            if not urls:
+                all_internal = self._extract_internal_links(soup, url)
+                urls.extend(all_internal)
 
         except Exception as e:
             logger.debug("page_parse_failed", url=url, error=str(e))
@@ -295,7 +315,10 @@ class DiscoveryEngine:
         """Check if a URL belongs to the same domain."""
         parsed = urlparse(url)
         url_domain = parsed.netloc.lower()
-        return url_domain == domain or url_domain.endswith(f".{domain}")
+        # Normalize: strip www. prefix for comparison
+        url_domain_clean = url_domain.removeprefix("www.")
+        domain_clean = domain.removeprefix("www.")
+        return url_domain_clean == domain_clean or url_domain_clean.endswith(f".{domain_clean}")
 
     def _deduplicate(self, urls: list[DiscoveredURL]) -> list[DiscoveredURL]:
         """Remove duplicate URLs, keeping the one with the best source."""

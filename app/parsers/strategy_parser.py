@@ -64,9 +64,6 @@ class StrategyParser:
                     self._orderer.record_failure(strategy.name, elapsed_ms)
                 continue
 
-            if combined.confidence >= self._confidence_threshold:
-                break
-
         if self._orderer:
             self._orderer.save_stats()
 

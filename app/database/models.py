@@ -97,6 +97,10 @@ class Competitor(Base):
     collection_logs: Mapped[list["CollectionLog"]] = relationship(
         "CollectionLog", back_populates="competitor", cascade="all, delete-orphan"
     )
+    company_info: Mapped["CompetitorCompanyInfo | None"] = relationship(
+        "CompetitorCompanyInfo", back_populates="competitor", cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     __table_args__ = (
         Index("ix_competitor_collection_frequency", "collection_frequency"),
@@ -228,6 +232,7 @@ class CompetitorPricing(Base):
     competitor: Mapped["Competitor"] = relationship("Competitor", back_populates="pricing")
 
     __table_args__ = (
+        UniqueConstraint("competitor_id", "service_name", name="uq_competitor_pricing_service"),
         Index("ix_competitor_pricing_competitor_id", "competitor_id"),
         Index("ix_competitor_pricing_content_hash", "content_hash"),
         {"comment": "Pricing data collected from competitors"},
@@ -317,6 +322,37 @@ class CollectionLog(Base):
         Index("ix_collection_log_competitor_id", "competitor_id"),
         Index("ix_collection_log_start_time", "start_time"),
         {"comment": "Audit trail of all collection runs"},
+    )
+
+
+class CompetitorCompanyInfo(Base):
+    __tablename__ = "competitor_company_info"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competitor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("competitors.id", ondelete="CASCADE"), nullable=False
+    )
+    logo_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    headquarters: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    operating_countries: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    operating_cities: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    social_links: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # Relationships
+    competitor: Mapped["Competitor"] = relationship("Competitor", back_populates="company_info")
+
+    __table_args__ = (
+        UniqueConstraint("competitor_id", name="uq_competitor_company_info"),
+        Index("ix_competitor_company_info_competitor_id", "competitor_id"),
+        {"comment": "Extracted company information per competitor"},
     )
 
 

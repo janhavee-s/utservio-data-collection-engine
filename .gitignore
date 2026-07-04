@@ -37,11 +37,6 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Docker
-postgres-data/
-redis-data/
-app-data/
-
 # Alembic
 migrations/versions/*.pyc
 

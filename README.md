@@ -19,7 +19,7 @@ This system does not analyze data. It collects it.
 | **Observability** | Prometheus `/metrics` and `/metrics/summary` endpoints, counters/gauges/histograms |
 | **Performance Utilities** | LRU cache, URL/Content deduplication, `@cached_parse` decorator |
 
-## Quick Start — Native (No Docker)
+## Quick Start
 
 ```bash
 # 1. Clone and setup
@@ -121,18 +121,6 @@ uvicorn app.main:app --reload
 
 ---
 
-## Quick Start — Docker
-
-```bash
-cp .env.example .env
-docker compose up -d
-alembic upgrade head
-```
-
-The API starts at `http://localhost:8000`. Interactive docs at `/docs` when `CI_DEBUG=true`.
-
----
-
 ## Helper Scripts
 
 All scripts are in the `scripts/` directory:
@@ -151,7 +139,7 @@ All scripts are in the `scripts/` directory:
 
 ## Development Workflow
 
-### Native Development
+### Development Workflow
 
 ```bash
 # Setup (first time only)
@@ -168,19 +156,6 @@ pytest tests/unit/ -v
 ruff check .
 ruff format .
 mypy app/
-```
-
-### Docker Development
-
-```bash
-# Start PostgreSQL and Redis
-docker compose up -d postgres redis
-
-# Start application
-uvicorn app.main:app --reload
-
-# Run tests
-pytest tests/unit/ -v
 ```
 
 ### Testing
@@ -277,7 +252,6 @@ See `.env.example` for the full list.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/health` | No | Health check |
 | GET | `/status` | Yes | Competitor and log counts |
 | GET | `/logs` | Yes | Collection logs (paginated) |
 | GET | `/competitors` | Yes | List all competitors |
@@ -285,17 +259,23 @@ See `.env.example` for the full list.
 | POST | `/competitors` | Yes | Create competitor |
 | PUT | `/competitors/{id}` | Yes | Update competitor |
 | DELETE | `/competitors/{id}` | Yes | Delete competitor |
+| GET | `/competitors/{id}/overview` | Yes | Data overview for competitor |
+| GET | `/competitors/{id}/services` | Yes | Services (paginated) |
+| GET | `/competitors/{id}/pricing` | Yes | Pricing (paginated) |
+| GET | `/competitors/{id}/social` | Yes | Social profiles |
+| GET | `/competitors/{id}/company` | Yes | Company info |
+| GET | `/competitors/{id}/content` | Yes | Content/articles (paginated) |
 | POST | `/collection/collect` | Yes | Trigger collection by request body |
 | POST | `/collection/collect/{id}` | Yes | Trigger collection for one competitor |
-| GET | `/metrics` | No | Prometheus metrics exposition |
-| GET | `/metrics/summary` | No | JSON summary of all metrics |
+| GET | `/metrics` | Yes | Prometheus metrics exposition |
+| GET | `/metrics/summary` | Yes | JSON summary of all metrics |
 
 ### Authentication
 
-All endpoints except `/health`, `/metrics`, and `/metrics/summary` require an API key in the `X-API-Key` header:
+All endpoints require an API key in the `X-API-Key` header:
 
 ```bash
-curl -H "X-API-Key: your-api-key" http://localhost:8000/competitors
+curl -H "X-API-Key: utservio_data_engine" http://localhost:8000/competitors
 ```
 
 If no API key is configured, authentication is bypassed.

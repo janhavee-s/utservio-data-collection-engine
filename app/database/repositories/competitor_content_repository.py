@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import CompetitorContent
@@ -32,23 +33,6 @@ class CompetitorContentRepository(BaseRepository):
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_by_url(self, competitor_id: int, url: str) -> CompetitorContent | None:
-        stmt = select(CompetitorContent).where(
-            CompetitorContent.competitor_id == competitor_id,
-            CompetitorContent.url == url,
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_by_hash(self, competitor_id: int, content_hash: str) -> CompetitorContent | None:
-        """Find a content item by its content hash within a competitor scope."""
-        stmt = select(CompetitorContent).where(
-            CompetitorContent.competitor_id == competitor_id,
-            CompetitorContent.content_hash == content_hash,
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()
-
     async def upsert(
         self,
         competitor_id: int,
@@ -61,39 +45,45 @@ class CompetitorContentRepository(BaseRepository):
         raw_content: str | None = None,
         content_type: str | None = None,
     ) -> tuple[CompetitorContent, bool]:
-        """Insert or update a content item based on URL or content hash.
-
-        Returns (row, was_created) where was_created is True if a new record was inserted.
-        """
-        # Primary: check by URL
-        existing = await self.get_by_url(competitor_id, url)
-        if existing:
-            existing.collected_at = datetime.now(UTC)
-            await self._session.flush()
-            return existing, False
-
-        # Secondary: check by content hash (same content, different URL)
-        existing = await self.get_by_hash(competitor_id, content_hash)
-        if existing:
-            existing.collected_at = datetime.now(UTC)
-            await self._session.flush()
-            return existing, False
-
-        row = await self.create(
-            competitor_id=competitor_id,
-            content_hash=content_hash,
-            title=title,
-            url=url,
-            author=author,
-            publish_date=publish_date,
-            summary=summary,
-            raw_content=raw_content,
-            content_type=content_type,
+        """Insert or update a content item using atomic PostgreSQL upsert on URL."""
+        stmt = (
+            insert(CompetitorContent)
+            .values(
+                competitor_id=competitor_id,
+                content_hash=content_hash,
+                title=title,
+                url=url,
+                author=author,
+                publish_date=publish_date,
+                summary=summary,
+                raw_content=raw_content,
+                content_type=content_type,
+            )
+            .on_conflict_do_update(
+                index_elements=["competitor_id", "url"],
+                set_={
+                    "content_hash": content_hash,
+                    "title": title,
+                    "author": author,
+                    "publish_date": publish_date,
+                    "summary": summary,
+                    "raw_content": raw_content,
+                    "content_type": content_type,
+                    "collected_at": datetime.now(UTC),
+                },
+            )
+            .returning(CompetitorContent)
         )
-        return row, True
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        row = result.scalar_one()
+        return row, row.content_hash == content_hash
 
     async def delete_by_competitor(self, competitor_id: int) -> None:
-        content = await self.get_by_competitor(competitor_id)
-        for item in content:
-            await self._session.delete(item)
+        from sqlalchemy import delete
+
+        stmt = delete(CompetitorContent).where(
+            CompetitorContent.competitor_id == competitor_id
+        )
+        await self._session.execute(stmt)
         await self._session.flush()

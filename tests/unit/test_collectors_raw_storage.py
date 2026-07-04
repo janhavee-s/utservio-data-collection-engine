@@ -25,7 +25,12 @@ class TestCompanyCollectorRawStorage:
         with (
             patch.object(collector, "fetch", new_callable=AsyncMock, return_value=mock_result),
             patch.object(collector, "store_raw", new_callable=AsyncMock) as mock_store,
+            patch("app.collectors.company.CompetitorCompanyInfoRepository") as mock_repo_cls,
         ):
+            mock_repo = AsyncMock()
+            mock_repo.upsert = AsyncMock(return_value=(MagicMock(), True))
+            mock_repo_cls.return_value = mock_repo
+
             session = MagicMock()
             result = await collector.collect(1, "https://example.com", session=session)
 
@@ -75,10 +80,16 @@ class TestPricingCollectorRawStorage:
         )
 
         with (
-            patch.object(collector, "fetch", new_callable=AsyncMock, return_value=mock_result),
+            patch("app.collectors.fetcher.HybridFetcher") as mock_fetcher_cls,
             patch.object(collector, "store_raw", new_callable=AsyncMock) as mock_store,
             patch("app.collectors.pricing.CompetitorPricingRepository") as mock_repo_cls,
         ):
+            mock_fetcher = AsyncMock()
+            mock_fetcher._fetch_dynamic_with_city_selection = AsyncMock(
+                return_value=(mock_result, [])
+            )
+            mock_fetcher_cls.return_value = mock_fetcher
+            
             mock_repo = AsyncMock()
             mock_repo.delete_by_competitor = AsyncMock()
             mock_repo.create = AsyncMock()

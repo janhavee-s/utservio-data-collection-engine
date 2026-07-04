@@ -111,8 +111,22 @@ class TestHybridFetcher:
     @pytest.mark.asyncio
     async def test_fetch_static_page_uses_httpx(self) -> None:
         fetcher = HybridFetcher()
+        # Use a realistic static page with enough content to avoid minimal content detection
+        static_html = """
+        <html>
+        <head><title>Test Page</title></head>
+        <body>
+        <h1>Welcome to our website</h1>
+        <p>This is a test page with enough content to be considered static.
+        It has multiple paragraphs and proper HTML structure that indicates
+        it's a fully rendered page without requiring JavaScript.</p>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+        Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+        </body>
+        </html>
+        """
         mock_response = MagicMock()
-        mock_response.text = "<html><body>Static content</body></html>"
+        mock_response.text = static_html
         mock_response.status_code = 200
 
         with patch.object(fetcher, "_fetch_static", new_callable=AsyncMock) as mock_static:

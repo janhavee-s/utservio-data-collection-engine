@@ -6,6 +6,8 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+from app.utilities.tracing import set_trace_id
+
 MAX_IPS = 10000
 
 
@@ -53,3 +55,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             sorted_ips = sorted(self._requests.items(), key=lambda x: x[1][-1] if x[1] else 0)
             for ip, _ in sorted_ips[: len(sorted_ips) - MAX_IPS]:
                 del self._requests[ip]
+
+
+class TracingMiddleware(BaseHTTPMiddleware):
+    """Middleware to propagate trace_id from request headers."""
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        # Extract trace_id from header or generate new one
+        trace_id = request.headers.get("X-Trace-Id")
+        set_trace_id(trace_id)
+
+        # Add trace_id to response headers
+        result: Response = await call_next(request)
+        result.headers["X-Trace-Id"] = trace_id or ""
+        return result

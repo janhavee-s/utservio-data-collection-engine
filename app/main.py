@@ -9,8 +9,8 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.endpoints import collection, competitors, health, metrics
-from app.api.middleware import RateLimitMiddleware
+from app.api.endpoints import collection, competitors, data, health, metrics
+from app.api.middleware import RateLimitMiddleware, TracingMiddleware
 from app.configuration.settings import Settings, get_settings
 from app.database.connection import db_manager
 
@@ -86,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"name": "competitors", "description": "Competitor management"},
             {"name": "collection", "description": "Data collection operations"},
             {"name": "metrics", "description": "System metrics"},
+            {"name": "data", "description": "Data query endpoints"},
         ],
     )
 
@@ -111,11 +112,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
+    app.add_middleware(TracingMiddleware)
 
     app.include_router(health.router)
     app.include_router(competitors.router)
     app.include_router(collection.router)
     app.include_router(metrics.router)
+    app.include_router(data.router)
 
     _configure_logging(settings.log_level)
 

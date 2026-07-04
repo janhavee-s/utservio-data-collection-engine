@@ -3,7 +3,12 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from app.parsers.strategies.shared import SOCIAL_PLATFORM_DOMAINS, parse_price
+from app.parsers.strategies.shared import (
+    SOCIAL_PLATFORM_DOMAINS,
+    detect_currency_from_url,
+    is_valid_service_name,
+    parse_price,
+)
 from app.parsers.strategy import ParsedResult, ParsingStrategy
 
 SCHEMA_ORG_TYPES = {
@@ -59,38 +64,101 @@ class SchemaOrgStrategy(ParsingStrategy):
         ):
             self._extract_organization(props, result, url)
         elif "Service" in itemtype:
-            name = props.get("name", [""])[0] if props.get("name") else ""
-            result.services.append(
-                {
-                    "name": name,
-                    "description": (
-                        props.get("description", [None])[0] if props.get("description") else None
-                    ),
-                    "category": props.get("category", [None])[0] if props.get("category") else None,
-                    "starting_price": None,
-                    "currency": "USD",
-                    "estimated_duration": None,
-                }
-            )
+            self._extract_service(props, result, url)
         elif "Product" in itemtype or "Offer" in itemtype:
-            name = props.get("name", [""])[0] if props.get("name") else ""
-            price_text = props.get("price", [None])[0] if props.get("price") else None
-            result.pricing.append(
-                {
-                    "service_name": name,
-                    "category": props.get("category", [None])[0] if props.get("category") else None,
-                    "base_price": parse_price(price_text),
-                    "promotional_price": None,
-                    "currency": (
-                        props.get("priceCurrency", ["USD"])[0]
-                        if props.get("priceCurrency")
-                        else "USD"
-                    ),
-                    "discount": None,
-                    "subscription_plans": {},
-                    "membership_pricing": None,
-                }
+            self._extract_product(props, result, url)
+        elif "Article" in itemtype or "BlogPosting" in itemtype:
+            self._extract_article(props, result, url)
+
+    def _extract_service(
+        self, props: dict[str, list[str]], result: ParsedResult, url: str
+    ) -> None:
+        name = props.get("name", [""])[0] if props.get("name") else ""
+        if not is_valid_service_name(name):
+            return
+        duration = (
+            (props.get("duration", [None])[0] if props.get("duration") else None)
+            or (
+                props.get("estimatedDuration", [None])[0]
+                if props.get("estimatedDuration")
+                else None
             )
+        )
+        currency = detect_currency_from_url(url)
+        result.services.append(
+            {
+                "name": name,
+                "description": (
+                    props.get("description", [None])[0] if props.get("description") else None
+                ),
+                "category": props.get("category", [None])[0] if props.get("category") else None,
+                "starting_price": None,
+                "currency": currency,
+                "estimated_duration": str(duration) if duration else None,
+            }
+        )
+
+    def _extract_product(
+        self, props: dict[str, list[str]], result: ParsedResult, url: str
+    ) -> None:
+        name = props.get("name", [""])[0] if props.get("name") else ""
+        if not is_valid_service_name(name):
+            return
+        price_text = props.get("price", [None])[0] if props.get("price") else None
+        promo_text = (
+            props.get("lowPrice", [None])[0]
+            if props.get("lowPrice")
+            else (props.get("salePrice", [None])[0] if props.get("salePrice") else None)
+        )
+        base_price = parse_price(price_text)
+        promo_price = parse_price(promo_text)
+        discount = None
+        if base_price and promo_price and base_price > 0:
+            discount = round((1 - promo_price / base_price) * 100, 1)
+
+        currency = detect_currency_from_url(url)
+        price_currency = (
+            props.get("priceCurrency", [None])[0] if props.get("priceCurrency") else None
+        )
+        if price_currency and price_currency != "USD":
+            currency = price_currency
+
+        result.pricing.append(
+            {
+                "service_name": name,
+                "category": props.get("category", [None])[0] if props.get("category") else None,
+                "base_price": base_price,
+                "promotional_price": promo_price,
+                "currency": currency,
+                "discount": discount,
+                "subscription_plans": {},
+                "membership_pricing": None,
+            }
+        )
+
+    def _extract_article(
+        self, props: dict[str, list[str]], result: ParsedResult, url: str
+    ) -> None:
+        title = props.get("headline", [None])[0] if props.get("headline") else None
+        if not title:
+            title = props.get("name", [None])[0] if props.get("name") else None
+        if not title or len(title) < 5:
+            return
+        article_url = props.get("url", [url])[0] if props.get("url") else url
+        result.content.append(
+            {
+                "title": title,
+                "author": props.get("author", [None])[0] if props.get("author") else None,
+                "publish_date": (
+                    props.get("datePublished", [None])[0] if props.get("datePublished") else None
+                ),
+                "url": urljoin(url, article_url),
+                "summary": (
+                    props.get("description", [None])[0] if props.get("description") else None
+                ),
+                "content_type": "article",
+            }
+        )
 
     def _get_properties(self, element: Any) -> dict[str, list[str]]:
         props: dict[str, list[str]] = {}
@@ -111,7 +179,10 @@ class SchemaOrgStrategy(ParsingStrategy):
         if not result.logo and props.get("logo"):
             result.logo = urljoin(url, props["logo"][0])
         if not result.headquarters and props.get("address"):
-            result.headquarters = props["address"][0]
+            addr = props["address"][0]
+            if isinstance(addr, list):
+                addr = addr[0] if addr else ""
+            result.headquarters = str(addr) if addr else None
         if not result.contact_email and props.get("email"):
             result.contact_email = props["email"][0]
         if not result.contact_phone and props.get("telephone"):

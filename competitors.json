@@ -24,51 +24,6 @@
       "notes": "India's largest home services marketplace offering cleaning, appliance repair, beauty, wellness, and home maintenance services. Primary benchmark competitor for pricing, service portfolio, and customer experience."
     },
     {
-      "name": "NoBroker Home Services",
-      "website_url": "https://www.nobroker.in/home-services",
-      "enabled": true,
-      "collection_frequency": "daily",
-      "modules": [
-        "discovery",
-        "company",
-        "services",
-        "pricing",
-        "content",
-        "social"
-      ],
-      "tags": [
-        "home-services",
-        "real-estate",
-        "cleaning",
-        "property",
-        "india"
-      ],
-      "notes": "Home services division of NoBroker offering cleaning, painting, pest control, AC servicing, appliance repair, and relocation services. Strong competitor due to its existing customer ecosystem."
-    },
-    {
-      "name": "Pronto",
-      "website_url": "https://www.getpronto.ai",
-      "enabled": true,
-      "collection_frequency": "daily",
-      "modules": [
-        "discovery",
-        "company",
-        "services",
-        "pricing",
-        "content",
-        "social"
-      ],
-      "tags": [
-        "hyperlocal",
-        "home-services",
-        "cleaning",
-        "instant-services",
-        "startup",
-        "india"
-      ],
-      "notes": "Emerging hyperlocal home services startup focused on fast booking and fulfillment. Important competitor for monitoring rapid growth, pricing strategy, and operational model."
-    },
-    {
       "name": "Snabbit",
       "website_url": "https://www.snabbit.com",
       "enabled": true,
@@ -90,6 +45,96 @@
         "india"
       ],
       "notes": "Fast-growing startup providing on-demand household help and cleaning services with a quick-response model. Valuable competitor for tracking innovation, customer acquisition, and service expansion."
+    },
+    {
+      "name": "Pronto",
+      "website_url": "https://withpronto.com/",
+      "enabled": true,
+      "collection_frequency": "daily",
+      "modules": [
+        "discovery",
+        "company",
+        "services",
+        "pricing",
+        "content",
+        "social"
+      ],
+      "tags": [
+        "hyperlocal",
+        "home-services",
+        "cleaning",
+        "quick-commerce",
+        "instant",
+        "india"
+      ],
+      "notes": "On-demand house help platform with transparent flat pricing. Live in 11 cities (Bangalore, Delhi, Mumbai, Hyderabad, Pune, etc.). 20 services, 500K+ homes served. Major competitor to Urban Company and Snabbit."
+    },
+    {
+      "name": "KaamKaka",
+      "website_url": "https://kamkaka.com/",
+      "enabled": true,
+      "collection_frequency": "daily",
+      "modules": [
+        "discovery",
+        "company",
+        "services",
+        "pricing",
+        "content",
+        "social"
+      ],
+      "tags": [
+        "home-services",
+        "cleaning",
+        "repairs",
+        "maintenance",
+        "india"
+      ],
+      "notes": "India's largest home services platform. 1M+ happy customers, 4.8+ average rating. Services across Bangalore, Mumbai, Hyderabad, Pune, Chennai, Delhi NCR. Full home cleaning, electrician, bathroom cleaning."
+    },
+    {
+      "name": "OyeKar",
+      "website_url": "https://oyekar.com/",
+      "enabled": true,
+      "collection_frequency": "daily",
+      "modules": [
+        "discovery",
+        "company",
+        "services",
+        "pricing",
+        "content",
+        "social"
+      ],
+      "tags": [
+        "home-services",
+        "office-services",
+        "cleaning",
+        "repairs",
+        "marketplace",
+        "india"
+      ],
+      "notes": "Leading service marketplace for home and office services. AC repair, cleaning, plumbing, electrician, beauty services. Active in Noida, Delhi, Bangalore, Jaipur, and more cities."
+    },
+    {
+      "name": "HiCare",
+      "website_url": "https://www.hicare.in/",
+      "enabled": true,
+      "collection_frequency": "daily",
+      "modules": [
+        "discovery",
+        "company",
+        "services",
+        "pricing",
+        "content",
+        "social"
+      ],
+      "tags": [
+        "pest-control",
+        "home-services",
+        "hygiene",
+        "cleaning",
+        "india"
+      ],
+      "notes": "Established pest control and home hygiene specialist. 34 services found. Strong brand presence with Playwright-rendered site. Good social data available."
     }
   ]
 }

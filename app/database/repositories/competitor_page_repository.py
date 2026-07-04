@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import CollectionStatus, CompetitorPage
@@ -62,24 +63,32 @@ class CompetitorPageRepository(BaseRepository):
     ) -> CompetitorPage:
         """Insert or update a page based on content hash.
 
-        If an identical page (same competitor, source, and content hash) exists,
-        update its collected_at timestamp. Otherwise, create a new record.
+        Uses PostgreSQL ON CONFLICT for atomic upsert to avoid race conditions.
         """
-        existing = await self.get_by_hash(competitor_id, source_id, content_hash)
-        if existing:
-            existing.raw_html = raw_html
-            existing.raw_json = raw_json
-            existing.metadata_ = metadata
-            existing.collection_status = collection_status
-            existing.collected_at = datetime.now(UTC)
-            await self._session.flush()
-            return existing
-        return await self.create(  # type: ignore[no-any-return]
-            competitor_id=competitor_id,
-            source_id=source_id,
-            content_hash=content_hash,
-            raw_html=raw_html,
-            raw_json=raw_json,
-            metadata_=metadata,
-            collection_status=collection_status,
+        stmt = (
+            insert(CompetitorPage)
+            .values(
+                competitor_id=competitor_id,
+                source_id=source_id,
+                content_hash=content_hash,
+                raw_html=raw_html,
+                raw_json=raw_json,
+                metadata_=metadata,
+                collection_status=collection_status,
+            )
+            .on_conflict_do_update(
+                index_elements=["competitor_id", "source_id"],
+                set_={
+                    "content_hash": content_hash,
+                    "raw_html": raw_html,
+                    "raw_json": raw_json,
+                    "metadata": metadata,
+                    "collection_status": collection_status,
+                    "collected_at": datetime.now(UTC),
+                },
+            )
+            .returning(CompetitorPage)
         )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return result.scalar_one()

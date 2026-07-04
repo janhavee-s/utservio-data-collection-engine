@@ -13,12 +13,16 @@ from app.services.collection_service import collection_service
 
 logger = structlog.get_logger(__name__)
 
+MAX_RETRIES = 2
+RETRY_BASE_DELAY = 5  # seconds
+
 
 class CollectionScheduler:
     def __init__(self) -> None:
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._interval_seconds: int = 60
+        self._active_collections: set[int] = set()
 
     async def start(self) -> None:
         if self._running:
@@ -64,6 +68,15 @@ class CollectionScheduler:
                         if not comp.enabled:
                             continue
 
+                        # Skip if already collecting
+                        if comp.id in self._active_collections:
+                            logger.debug(
+                                "skipping_competitor_already_collecting",
+                                competitor_id=comp.id,
+                                name=comp.name,
+                            )
+                            continue
+
                         last_log = await self._get_last_collection_log(session, comp.id)
                         if last_log and not self._should_collect(last_log, freq, now):
                             logger.debug(
@@ -80,15 +93,69 @@ class CollectionScheduler:
                             name=comp.name,
                             frequency=freq.value,
                         )
-                        try:
-                            await collection_service.collect_competitor(comp.id)
-                        except Exception:
-                            logger.exception(
-                                "scheduled_collection_failed",
-                                competitor_id=comp.id,
-                            )
+
+                        # Run collection with retry logic
+                        asyncio.create_task(
+                            self._collect_with_retry(comp.id, comp.name)
+                        )
         except Exception:
             logger.exception("scheduler_check_cycle_failed")
+
+    async def _collect_with_retry(self, competitor_id: int, name: str) -> None:
+        """Collect with exponential backoff retry logic."""
+        self._active_collections.add(competitor_id)
+        try:
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    result = await collection_service.collect_competitor(competitor_id)
+                    if result.get("status") == "success":
+                        logger.info(
+                            "scheduled_collection_completed",
+                            competitor_id=competitor_id,
+                            name=name,
+                            attempt=attempt + 1,
+                        )
+                        return
+                    elif attempt < MAX_RETRIES:
+                        delay = RETRY_BASE_DELAY * (2 ** attempt)
+                        logger.warning(
+                            "scheduled_collection_retry",
+                            competitor_id=competitor_id,
+                            name=name,
+                            attempt=attempt + 1,
+                            delay=delay,
+                            error=result.get("error"),
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            "scheduled_collection_failed_all_retries",
+                            competitor_id=competitor_id,
+                            name=name,
+                            attempts=MAX_RETRIES + 1,
+                            error=result.get("error"),
+                        )
+                except Exception as e:
+                    if attempt < MAX_RETRIES:
+                        delay = RETRY_BASE_DELAY * (2 ** attempt)
+                        logger.warning(
+                            "scheduled_collection_retry",
+                            competitor_id=competitor_id,
+                            name=name,
+                            attempt=attempt + 1,
+                            delay=delay,
+                            error=str(e),
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.exception(
+                            "scheduled_collection_failed_all_retries",
+                            competitor_id=competitor_id,
+                            name=name,
+                            attempts=MAX_RETRIES + 1,
+                        )
+        finally:
+            self._active_collections.discard(competitor_id)
 
     async def _get_last_collection_log(self, session: Any, competitor_id: int) -> Any:
         from app.database.repositories.collection_log_repository import CollectionLogRepository

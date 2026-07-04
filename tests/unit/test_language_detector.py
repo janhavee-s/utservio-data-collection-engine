@@ -21,7 +21,10 @@ class TestLanguageDetector:
         assert result.source == "html_tag"
 
     def test_detects_from_meta_content_language(self) -> None:
-        html = '<html><head><meta http-equiv="content-language" content="fr"></head><body></body></html>'
+        html = (
+            '<html><head><meta http-equiv="content-language" content="fr">'
+            "</head><body></body></html>"
+        )
         result = self.detector.detect(html)
         assert result.language == "fr"
         assert result.source == "meta_tag"

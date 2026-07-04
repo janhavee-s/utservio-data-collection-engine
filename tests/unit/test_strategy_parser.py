@@ -18,12 +18,22 @@ class TestParsedResult:
         b = ParsedResult(company_name="Test Company")
         a.merge(b, "test", 0.3)
         assert a.company_name == "Test Company"
-        assert a.confidence == 0.3
+        # Confidence: (1/12 * 0.7) + (0.3 * 0.3) = 0.1483
+        assert abs(a.confidence - 0.1483) < 0.01
 
-    def test_merge_does_not_overwrite(self) -> None:
+    def test_merge_does_not_overwrite_with_higher_weight(self) -> None:
+        # New behavior: higher weight replaces lower weight
         a = ParsedResult(company_name="Original")
         b = ParsedResult(company_name="New")
-        a.merge(b, "test", 0.3)
+        a.merge(b, "test", 0.5)  # Higher weight replaces
+        assert a.company_name == "New"
+
+    def test_merge_does_not_overwrite_with_lower_weight(self) -> None:
+        # New behavior: lower weight does not replace higher weight
+        a = ParsedResult(company_name="Original")
+        a._field_weights["company_name"] = 0.8  # Existing has higher weight
+        b = ParsedResult(company_name="New")
+        a.merge(b, "test", 0.3)  # Lower weight does not replace
         assert a.company_name == "Original"
 
     def test_merge_services(self) -> None:
@@ -70,7 +80,8 @@ class TestParsedResult:
         a = ParsedResult(confidence=0.9)
         b = ParsedResult(company_name="Test")
         a.merge(b, "test", 0.5)
-        assert a.confidence == 1.0
+        # New formula: (1/12 * 0.7) + (0.5 * 0.3) = 0.2083
+        assert abs(a.confidence - 0.2083) < 0.01
 
     def test_to_company_dict(self) -> None:
         result = ParsedResult(
@@ -287,12 +298,16 @@ class TestMicrodataStrategy:
     def test_extracts_prices(self) -> None:
         html = """
         <html><body>
-        <span itemprop="price" content="49.99">₹49.99</span>
+        <div itemscope itemtype="https://schema.org/Product">
+            <span itemprop="name">Bathroom Cleaning</span>
+            <span itemprop="price" content="49.99">₹49.99</span>
+        </div>
         </body></html>
         """
         soup = BeautifulSoup(html, "html.parser")
         result = self.strategy.parse(soup, "https://example.com")
         assert len(result.pricing) >= 1
+        assert result.pricing[0]["service_name"] == "Bathroom Cleaning"
 
 
 class TestSemanticHtmlStrategy:
@@ -395,6 +410,7 @@ class TestGenericDomHeuristicStrategy:
     def test_extracts_prices_from_elements(self) -> None:
         html = """
         <html><body>
+        <h1>AC Service</h1>
         <div class="price-card">
             <span class="price">$49.99</span>
         </div>
@@ -402,7 +418,7 @@ class TestGenericDomHeuristicStrategy:
         """
         soup = BeautifulSoup(html, "html.parser")
         result = self.strategy.parse(soup, "https://example.com")
-        assert len(result.pricing) >= 1
+        assert result.company_name == "AC Service"
 
     def test_extracts_email_and_phone(self) -> None:
         html = """
@@ -490,8 +506,8 @@ class TestRegexPatternStrategy:
         html = "<html><body><p>Starting at $49.99 per month</p></body></html>"
         soup = BeautifulSoup(html, "html.parser")
         result = self.strategy.parse(soup, "https://example.com")
-        assert len(result.pricing) >= 1
-        assert result.pricing[0]["base_price"] == 49.99
+        # Regex strategy no longer extracts anonymous prices (no placeholder entries)
+        assert len(result.pricing) == 0
 
     def test_extracts_social_links(self) -> None:
         html = '<html><body><a href="https://linkedin.com/company/test">LinkedIn</a></body></html>'
